@@ -4,6 +4,7 @@ import Layout from './components/Layout';
 import Dashboard from './pages/Dashboard';
 import QueryBuilder from './pages/QueryBuilder';
 import DataViewer from './pages/DataViewer';
+import ActiveTheories from './pages/ActiveTheories';
 import Settings from './pages/Settings';
 import Login from './pages/Login';
 import { authAPI } from './services/api';
@@ -81,6 +82,7 @@ function App() {
             <Route path="/dashboard" element={<Dashboard user={user} />} />
             <Route path="/query-builder" element={<QueryBuilder user={user} />} />
             <Route path="/data-viewer" element={<DataViewer user={user} />} />
+            <Route path="/active-theories" element={<ActiveTheories user={user} />} />
             <Route path="/settings" element={<Settings user={user} />} />
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Routes>

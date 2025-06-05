@@ -42,11 +42,21 @@ PERMITTED_USERS = {
         'role': 'admin',
         'permissions': ['read', 'write', 'admin']
     },
-    # Add more users here as needed
+    # Add more users here - uncomment and modify these examples:
     # '00012345': {
     #     'name': 'John Doe',
     #     'role': 'user', 
     #     'permissions': ['read']
+    # },
+    # '00067890': {
+    #     'name': 'Jane Smith',
+    #     'role': 'analyst',
+    #     'permissions': ['read', 'write']
+    # },
+    # '00054321': {
+    #     'name': 'Bob Johnson',
+    #     'role': 'admin',
+    #     'permissions': ['read', 'write', 'admin']
     # }
 }
 

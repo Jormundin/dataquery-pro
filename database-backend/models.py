@@ -149,4 +149,29 @@ class SettingsResponse(BaseModel):
 class ErrorResponse(BaseModel):
     error: str
     message: str
-    details: Optional[Dict[str, Any]] = None 
+    details: Optional[Dict[str, Any]] = None
+
+# Theory Management Models
+class CreateTheoryRequest(BaseModel):
+    theory_name: str
+    theory_description: str
+    theory_start_date: str  # YYYY-MM-DD format
+    theory_end_date: str    # YYYY-MM-DD format
+    user_iins: List[str]    # List of IIN values from query results
+
+class TheoryResponse(BaseModel):
+    theory_id: int
+    theory_name: str
+    theory_description: str
+    load_date: str
+    theory_start_date: str
+    theory_end_date: str
+    user_count: int
+    is_active: bool
+    created_by: str
+
+class TheoryCreateResponse(BaseModel):
+    success: bool
+    message: str
+    theory_id: Optional[int] = None
+    users_added: Optional[int] = None 

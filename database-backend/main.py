@@ -297,6 +297,87 @@ async def get_query_count(request: QueryRequest, current_user: dict = Depends(ge
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Ошибка получения количества строк: {str(e)}")
 
+# Theory Management endpoints
+@app.post("/theories/create", response_model=TheoryCreateResponse)
+async def create_theory_endpoint(request: CreateTheoryRequest, current_user: dict = Depends(get_current_user_dependency)):
+    """Создать новую теорию с пользователями"""
+    # Check permissions - only users with 'write' or 'admin' permissions can create theories
+    if 'write' not in current_user.get('permissions', []) and 'admin' not in current_user.get('permissions', []):
+        raise HTTPException(
+            status_code=403,
+            detail="Недостаточно прав для создания теорий"
+        )
+    
+    try:
+        from database import create_theory
+        
+        result = create_theory(
+            theory_name=request.theory_name,
+            theory_description=request.theory_description,
+            theory_start_date=request.theory_start_date,
+            theory_end_date=request.theory_end_date,
+            user_iins=request.user_iins,
+            created_by=current_user["username"]
+        )
+        
+        return TheoryCreateResponse(**result)
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Ошибка создания теории: {str(e)}")
+
+@app.get("/theories/active", response_model=List[TheoryResponse])
+async def get_active_theories_endpoint(current_user: dict = Depends(get_current_user_dependency)):
+    """Получить список всех теорий"""
+    try:
+        from database import get_active_theories
+        
+        result = get_active_theories()
+        
+        if result["success"]:
+            return result["data"]
+        else:
+            raise HTTPException(status_code=500, detail=result["message"])
+            
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Ошибка получения теорий: {str(e)}")
+
+@app.post("/theories/detect-iins")
+async def detect_iins_in_results(data: Dict[str, Any], current_user: dict = Depends(get_current_user_dependency)):
+    """Обнаружить IIN колонки в результатах запроса"""
+    try:
+        from database import detect_iin_columns, extract_iin_values
+        
+        query_results = data.get("results", [])
+        
+        if not query_results:
+            return {
+                "has_iin_column": False,
+                "iin_column": None,
+                "iin_values": [],
+                "user_count": 0
+            }
+        
+        iin_column = detect_iin_columns(query_results)
+        
+        if iin_column:
+            iin_values = extract_iin_values(query_results, iin_column)
+            return {
+                "has_iin_column": True,
+                "iin_column": iin_column,
+                "iin_values": iin_values,
+                "user_count": len(iin_values)
+            }
+        else:
+            return {
+                "has_iin_column": False,
+                "iin_column": None,
+                "iin_values": [],
+                "user_count": 0
+            }
+            
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Ошибка анализа результатов: {str(e)}")
+
 # Remaining endpoints with authentication protection...
 @app.get("/query/history", response_model=List[QueryHistoryResponse])
 async def get_query_history(

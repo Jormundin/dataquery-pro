@@ -110,6 +110,16 @@ export const databaseAPI = {
   // Get row count
   getRowCount: (queryData) => 
     api.post('/query/count', queryData),
+  
+  // Theory Management
+  createTheory: (theoryData) => 
+    api.post('/theories/create', theoryData),
+  
+  getActiveTheories: () => 
+    api.get('/theories/active'),
+  
+  detectIINs: (resultsData) => 
+    api.post('/theories/detect-iins', resultsData),
 };
 
 // Data API endpoints

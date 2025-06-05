@@ -7,7 +7,8 @@ import {
   Settings, 
   User, 
   LogOut,
-  Shield
+  Shield,
+  Flask
 } from 'lucide-react';
 
 const Layout = ({ user, onLogout, children }) => {
@@ -17,6 +18,7 @@ const Layout = ({ user, onLogout, children }) => {
     { path: '/dashboard', label: 'Панель управления', icon: BarChart3 },
     { path: '/query-builder', label: 'Конструктор запросов', icon: Database },
     { path: '/data-viewer', label: 'Просмотр данных', icon: Eye },
+    { path: '/active-theories', label: 'Активные теории', icon: Flask },
     { path: '/settings', label: 'Настройки', icon: Settings },
   ];
 
@@ -30,7 +32,7 @@ const Layout = ({ user, onLogout, children }) => {
     <div className="app-layout">
       <aside className="sidebar">
         <div className="sidebar-header">
-          <h1 className="sidebar-title">DataQuery Pro</h1>
+          <h1 className="sidebar-title">OCDS-SoftCollection</h1>
           <p style={{ fontSize: '0.875rem', color: '#94a3b8', marginTop: '0.5rem' }}>
             Oracle Database Interface
           </p>

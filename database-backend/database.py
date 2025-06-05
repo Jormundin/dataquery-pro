@@ -199,8 +199,157 @@ def execute_query(sql: str, params: Dict = None) -> Dict:
         }
         
     except Exception as e:
+        print(f"Query execution error: {e}")
         return {
             "success": False,
-            "error": str(e),
-            "message": f"Ошибка выполнения запроса: {str(e)}"
-        } 
+            "message": f"Database query failed: {str(e)}",
+            "error": str(e)
+        }
+
+# Theory Management Functions
+def get_next_theory_id():
+    """Get next available theory ID"""
+    try:
+        connection = get_connection_DSSB_APP()
+        cursor = connection.cursor()
+        
+        cursor.execute("SELECT NVL(MAX(theory_id), 0) + 1 FROM SoftCollection_theories")
+        result = cursor.fetchone()
+        next_id = result[0] if result else 1
+        
+        cursor.close()
+        connection.close()
+        
+        return next_id
+        
+    except Exception as e:
+        print(f"Error getting next theory ID: {e}")
+        # Return 1 if table doesn't exist yet
+        return 1
+
+def create_theory(theory_name, theory_description, theory_start_date, theory_end_date, user_iins, created_by):
+    """Create a new theory with user assignments"""
+    try:
+        connection = get_connection_DSSB_APP()
+        cursor = connection.cursor()
+        
+        # Get next theory ID
+        theory_id = get_next_theory_id()
+        
+        # Insert theory records for each user
+        insert_sql = """
+        INSERT INTO SoftCollection_theories 
+        (IIN, theory_name, theory_description, load_date, theory_start_date, theory_end_date, theory_id, created_by)
+        VALUES (:1, :2, :3, SYSDATE, TO_DATE(:4, 'YYYY-MM-DD'), TO_DATE(:5, 'YYYY-MM-DD'), :6, :7)
+        """
+        
+        users_added = 0
+        for iin in user_iins:
+            try:
+                cursor.execute(insert_sql, (
+                    iin, 
+                    theory_name, 
+                    theory_description,
+                    theory_start_date,
+                    theory_end_date,
+                    theory_id,
+                    created_by
+                ))
+                users_added += 1
+            except Exception as e:
+                print(f"Error inserting IIN {iin}: {e}")
+                continue
+        
+        connection.commit()
+        cursor.close()
+        connection.close()
+        
+        return {
+            "success": True,
+            "message": f"Theory '{theory_name}' created successfully",
+            "theory_id": theory_id,
+            "users_added": users_added
+        }
+        
+    except Exception as e:
+        print(f"Error creating theory: {e}")
+        return {
+            "success": False,
+            "message": f"Failed to create theory: {str(e)}"
+        }
+
+def get_active_theories():
+    """Get all currently active theories"""
+    try:
+        connection = get_connection_DSSB_APP()
+        cursor = connection.cursor()
+        
+        # Get theories that are currently active
+        query = """
+        SELECT 
+            theory_id,
+            theory_name,
+            theory_description,
+            TO_CHAR(MIN(load_date), 'YYYY-MM-DD') as load_date,
+            TO_CHAR(theory_start_date, 'YYYY-MM-DD') as theory_start_date,
+            TO_CHAR(theory_end_date, 'YYYY-MM-DD') as theory_end_date,
+            COUNT(*) as user_count,
+            CASE WHEN SYSDATE BETWEEN theory_start_date AND theory_end_date THEN 1 ELSE 0 END as is_active,
+            MAX(created_by) as created_by
+        FROM SoftCollection_theories
+        GROUP BY theory_id, theory_name, theory_description, theory_start_date, theory_end_date
+        ORDER BY theory_start_date DESC
+        """
+        
+        cursor.execute(query)
+        columns = [desc[0].lower() for desc in cursor.description]
+        
+        theories = []
+        for row in cursor.fetchall():
+            theory_dict = dict(zip(columns, row))
+            theory_dict['is_active'] = bool(theory_dict['is_active'])
+            theories.append(theory_dict)
+        
+        cursor.close()
+        connection.close()
+        
+        return {
+            "success": True,
+            "data": theories,
+            "message": f"Retrieved {len(theories)} theories"
+        }
+        
+    except Exception as e:
+        print(f"Error getting active theories: {e}")
+        return {
+            "success": False,
+            "data": [],
+            "message": f"Failed to get theories: {str(e)}"
+        }
+
+def detect_iin_columns(data):
+    """Detect IIN or IIN_BIN columns in query results"""
+    if not data or len(data) == 0:
+        return None
+    
+    # Check column names for IIN-like patterns
+    first_row = data[0]
+    for column_name in first_row.keys():
+        column_upper = column_name.upper()
+        if 'IIN' in column_upper or 'IIN_BIN' in column_upper:
+            return column_name
+    
+    return None
+
+def extract_iin_values(data, iin_column):
+    """Extract unique IIN values from query results"""
+    if not data or not iin_column:
+        return []
+    
+    iin_values = set()
+    for row in data:
+        iin_value = row.get(iin_column)
+        if iin_value and str(iin_value).strip():
+            iin_values.add(str(iin_value).strip())
+    
+    return list(iin_values) 

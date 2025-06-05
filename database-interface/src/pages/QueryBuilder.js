@@ -28,6 +28,17 @@ const QueryBuilder = () => {
   const [isCountLoading, setIsCountLoading] = useState(false);
   const [countError, setCountError] = useState(null);
 
+  // Theory creation state
+  const [showTheoryModal, setShowTheoryModal] = useState(false);
+  const [theoryData, setTheoryData] = useState({
+    theory_name: '',
+    theory_description: '',
+    theory_start_date: '',
+    theory_end_date: ''
+  });
+  const [iinInfo, setIinInfo] = useState(null);
+  const [isCreatingTheory, setIsCreatingTheory] = useState(false);
+
   useEffect(() => {
     loadDatabases();
   }, []);
@@ -175,6 +186,11 @@ const QueryBuilder = () => {
           totalRows: response.data.row_count || 0,
           executionTime: response.data.execution_time || '0.000s'
         });
+        
+        // Check for IIN columns in results for theory creation
+        if (response.data.data && response.data.data.length > 0) {
+          await checkForIINColumns(response.data.data);
+        }
       } else {
         setError('Ошибка выполнения запроса: ' + response.data.message);
       }
@@ -198,6 +214,117 @@ const QueryBuilder = () => {
       setQueryResults(mockResults);
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const getRowCount = async () => {
+    if (!selectedTable) return;
+
+    setIsCountLoading(true);
+    setCountError(null);
+
+    // Debounce timeout to avoid too many requests
+    setTimeout(async () => {
+      try {
+        const queryData = {
+          database_id: selectedDatabase,
+          table: selectedTable,
+          filters: filters.filter(f => f.column && f.value),
+        };
+
+        const response = await databaseAPI.getRowCount(queryData);
+        
+        if (response.data.success) {
+          setRowCount(response.data.count);
+        } else {
+          setCountError(response.data.message || 'Ошибка получения количества строк');
+        }
+        
+      } catch (err) {
+        console.error('Error getting row count:', err);
+        setCountError('Ошибка подсчета строк: ' + (err.response?.data?.detail || err.message));
+      } finally {
+        setIsCountLoading(false);
+      }
+    }, 500);
+  };
+
+  // Theory creation functions
+  const checkForIINColumns = async (results) => {
+    try {
+      const response = await databaseAPI.detectIINs({ results });
+      setIinInfo(response.data);
+      
+      if (response.data.has_iin_column) {
+        // Show success message that theory creation is available
+        console.log(`Обнаружена IIN колонка: ${response.data.iin_column} (${response.data.user_count} пользователей)`);
+      }
+    } catch (err) {
+      console.error('Error detecting IIN columns:', err);
+    }
+  };
+
+  const openTheoryModal = () => {
+    if (!iinInfo?.has_iin_column) {
+      setError('В результатах запроса не найдена IIN колонка для создания теории');
+      return;
+    }
+    
+    // Set default dates (today and one year from now)
+    const today = new Date().toISOString().split('T')[0];
+    const nextYear = new Date();
+    nextYear.setFullYear(nextYear.getFullYear() + 1);
+    const endDate = nextYear.toISOString().split('T')[0];
+    
+    setTheoryData({
+      theory_name: '',
+      theory_description: '',
+      theory_start_date: today,
+      theory_end_date: endDate
+    });
+    
+    setShowTheoryModal(true);
+  };
+
+  const createTheory = async () => {
+    if (!theoryData.theory_name || !theoryData.theory_start_date || !theoryData.theory_end_date) {
+      setError('Пожалуйста, заполните все обязательные поля теории');
+      return;
+    }
+
+    if (new Date(theoryData.theory_start_date) >= new Date(theoryData.theory_end_date)) {
+      setError('Дата окончания должна быть позже даты начала');
+      return;
+    }
+
+    setIsCreatingTheory(true);
+
+    try {
+      const response = await databaseAPI.createTheory({
+        ...theoryData,
+        user_iins: iinInfo.iin_values
+      });
+
+      if (response.data.success) {
+        setShowTheoryModal(false);
+        setError(null);
+        alert(`Теория "${theoryData.theory_name}" создана успешно! Добавлено ${response.data.users_added} пользователей.`);
+        
+        // Reset theory data
+        setTheoryData({
+          theory_name: '',
+          theory_description: '',
+          theory_start_date: '',
+          theory_end_date: ''
+        });
+      } else {
+        setError('Ошибка создания теории: ' + response.data.message);
+      }
+    } catch (err) {
+      console.error('Error creating theory:', err);
+      setError('Ошибка создания теории: ' + (err.response?.data?.detail || err.message));
+    } finally {
+      setIsCreatingTheory(false);
     }
   };
 
@@ -247,42 +374,6 @@ const QueryBuilder = () => {
     }
     
     return sql;
-  };
-
-  const getRowCount = async () => {
-    if (!selectedTable) {
-      setRowCount(null);
-      return;
-    }
-
-    setIsCountLoading(true);
-    setCountError(null);
-    
-    try {
-      const queryData = {
-        database_id: selectedDatabase,
-        table: selectedTable,
-        filters: filters.filter(f => f.column && f.value)
-      };
-
-      const response = await databaseAPI.getRowCount(queryData);
-      
-      if (response.data.success) {
-        setRowCount(response.data.count);
-      } else {
-        setCountError('Ошибка получения количества строк: ' + response.data.message);
-      }
-      
-    } catch (err) {
-      console.error('Error getting row count:', err);
-      setCountError('Ошибка получения количества строк: ' + (err.response?.data?.detail || err.message));
-      
-      // Fallback to mock count
-      const mockCount = Math.floor(Math.random() * 1000) + 1;
-      setRowCount(mockCount);
-    } finally {
-      setIsCountLoading(false);
-    }
   };
 
   // Auto-update count when filters change
@@ -634,6 +725,16 @@ const QueryBuilder = () => {
               Экспорт результатов
             </button>
           )}
+          
+          {iinInfo?.has_iin_column && (
+            <button 
+              className="btn btn-warning"
+              onClick={openTheoryModal}
+              style={{ backgroundColor: '#f59e0b', borderColor: '#f59e0b' }}
+            >
+              🧪 Создать теорию ({iinInfo.user_count} польз.)
+            </button>
+          )}
         </div>
       </div>
 
@@ -666,6 +767,95 @@ const QueryBuilder = () => {
                 ))}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+      
+      {/* Theory Creation Modal */}
+      {showTheoryModal && (
+        <div className="modal-overlay" onClick={() => setShowTheoryModal(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>🧪 Создание новой теории</h3>
+              <button 
+                className="modal-close"
+                onClick={() => setShowTheoryModal(false)}
+              >
+                ×
+              </button>
+            </div>
+            
+            <div className="modal-body">
+              <div style={{ marginBottom: '1rem', padding: '1rem', backgroundColor: '#f0f9ff', border: '1px solid #0ea5e9', borderRadius: '6px' }}>
+                <div style={{ fontSize: '0.875rem', color: '#0369a1' }}>
+                  📊 <strong>Найдена IIN колонка:</strong> {iinInfo?.iin_column}
+                </div>
+                <div style={{ fontSize: '0.875rem', color: '#0369a1', marginTop: '0.25rem' }}>
+                  👥 <strong>Количество пользователей:</strong> {iinInfo?.user_count}
+                </div>
+              </div>
+              
+              <div className="form-group">
+                <label className="form-label">Название теории *</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  value={theoryData.theory_name}
+                  onChange={(e) => setTheoryData({ ...theoryData, theory_name: e.target.value })}
+                  placeholder="Введите название теории"
+                />
+              </div>
+              
+              <div className="form-group">
+                <label className="form-label">Описание теории</label>
+                <textarea
+                  className="form-input"
+                  rows="3"
+                  value={theoryData.theory_description}
+                  onChange={(e) => setTheoryData({ ...theoryData, theory_description: e.target.value })}
+                  placeholder="Описание теории (необязательно)"
+                />
+              </div>
+              
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                <div className="form-group">
+                  <label className="form-label">Дата начала *</label>
+                  <input
+                    type="date"
+                    className="form-input"
+                    value={theoryData.theory_start_date}
+                    onChange={(e) => setTheoryData({ ...theoryData, theory_start_date: e.target.value })}
+                  />
+                </div>
+                
+                <div className="form-group">
+                  <label className="form-label">Дата окончания *</label>
+                  <input
+                    type="date"
+                    className="form-input"
+                    value={theoryData.theory_end_date}
+                    onChange={(e) => setTheoryData({ ...theoryData, theory_end_date: e.target.value })}
+                  />
+                </div>
+              </div>
+            </div>
+            
+            <div className="modal-footer">
+              <button 
+                className="btn btn-secondary"
+                onClick={() => setShowTheoryModal(false)}
+                disabled={isCreatingTheory}
+              >
+                Отмена
+              </button>
+              <button 
+                className="btn btn-primary"
+                onClick={createTheory}
+                disabled={isCreatingTheory || !theoryData.theory_name}
+              >
+                {isCreatingTheory ? 'Создание...' : 'Создать теорию'}
+              </button>
+            </div>
           </div>
         </div>
       )}

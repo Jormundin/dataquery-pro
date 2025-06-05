@@ -64,7 +64,7 @@ const Login = ({ onLoginSuccess }) => {
             fontWeight: '700', 
             marginBottom: '0.5rem' 
           }}>
-            🏢 DataQuery Pro
+            🏢 OCDS-SoftCollection
           </h1>
           <p style={{ color: '#6b7280', fontSize: '1rem' }}>
             Корпоративный интерфейс для Oracle Database
@@ -137,8 +137,6 @@ const Login = ({ onLoginSuccess }) => {
           fontSize: '0.875rem', 
           color: '#6b7280' 
         }}>
-          <p>🔐 LDAP Authentication</p>
-          <p>Используйте ваши корпоративные учетные данные</p>
         </div>
       </div>
     </div>
