@@ -9,7 +9,7 @@ const api = axios.create({
   },
 });
 
-// Request interceptor to add auth tokens if needed
+// Request interceptor to add auth tokens
 api.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem('authToken');
@@ -23,21 +23,56 @@ api.interceptors.request.use(
   }
 );
 
-// Response interceptor for error handling
+// Response interceptor for error handling and token refresh
 api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
-      // Handle unauthorized access
+      // Handle unauthorized access - clear token and redirect to login
       localStorage.removeItem('authToken');
+      localStorage.removeItem('userInfo');
       window.location.href = '/login';
     }
     return Promise.reject(error);
   }
 );
 
+// Authentication API endpoints
+export const authAPI = {
+  // Login with LDAP credentials
+  login: (credentials) => api.post('/auth/login', credentials),
+  
+  // Get current user info
+  getCurrentUser: () => api.get('/auth/me'),
+  
+  // Logout
+  logout: () => {
+    localStorage.removeItem('authToken');
+    localStorage.removeItem('userInfo');
+    return api.post('/auth/logout');
+  },
+  
+  // Check if user is authenticated
+  isAuthenticated: () => {
+    const token = localStorage.getItem('authToken');
+    const userInfo = localStorage.getItem('userInfo');
+    return !!(token && userInfo);
+  },
+  
+  // Get stored user info
+  getUserInfo: () => {
+    const userInfo = localStorage.getItem('userInfo');
+    return userInfo ? JSON.parse(userInfo) : null;
+  }
+};
+
 // Database API endpoints
 export const databaseAPI = {
+  // Authentication
+  login: authAPI.login,
+  logout: authAPI.logout,
+  getCurrentUser: authAPI.getCurrentUser,
+  
   // Get all databases
   getDatabases: () => api.get('/databases'),
   

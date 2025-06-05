@@ -3,13 +3,14 @@ import time
 import io
 import csv
 import math
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Dict, Optional, Any
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Query, Response
+from fastapi import FastAPI, HTTPException, Query, Response, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from dotenv import load_dotenv
 
 from models import *
@@ -18,6 +19,7 @@ from database import (
     test_connection, execute_query
 )
 from query_builder import QueryBuilder
+from auth import authenticate_user, create_access_token, get_current_user, ACCESS_TOKEN_EXPIRE_MINUTES
 
 # Load environment variables
 load_dotenv()
@@ -28,6 +30,7 @@ async def lifespan(app: FastAPI):
     # Startup
     print("🚀 DataQuery Pro Backend запущен")
     print("📊 Подключение к Oracle Database настроено")
+    print("🔐 LDAP Authentication настроен")
     yield
     # Shutdown
     print("👋 DataQuery Pro Backend остановлен")
@@ -48,6 +51,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Security
+security = HTTPBearer()
 
 # Initialize query builder
 query_builder = QueryBuilder()
@@ -80,6 +86,11 @@ app_settings = {
     }
 }
 
+def get_current_user_dependency(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    """Dependency to get current authenticated user"""
+    token = credentials.credentials
+    return get_current_user(token)
+
 # Root endpoint
 @app.get("/")
 async def root():
@@ -87,7 +98,8 @@ async def root():
         "message": "DataQuery Pro API", 
         "version": "1.0.0",
         "status": "running",
-        "docs": "/docs"
+        "docs": "/docs",
+        "authentication": "LDAP enabled"
     }
 
 # Health check
@@ -95,9 +107,48 @@ async def root():
 async def health_check():
     return {"status": "healthy", "timestamp": datetime.now().isoformat()}
 
-# Database endpoints
+# Authentication endpoints
+@app.post("/auth/login", response_model=LoginResponse)
+async def login(request: LoginRequest):
+    """LDAP Authentication Login"""
+    try:
+        user_info = authenticate_user(request.username, request.password)
+        
+        # Create access token
+        access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+        access_token = create_access_token(
+            data={"sub": user_info["username"]}, 
+            expires_delta=access_token_expires
+        )
+        
+        return LoginResponse(
+            access_token=access_token,
+            token_type="bearer",
+            user=user_info,
+            expires_in=ACCESS_TOKEN_EXPIRE_MINUTES * 60  # in seconds
+        )
+        
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Authentication error: {str(e)}"
+        )
+
+@app.get("/auth/me", response_model=UserResponse)
+async def get_current_user_info(current_user: dict = Depends(get_current_user_dependency)):
+    """Get current authenticated user information"""
+    return UserResponse(**current_user)
+
+@app.post("/auth/logout")
+async def logout():
+    """Logout (client-side token removal)"""
+    return {"message": "Successfully logged out"}
+
+# Protected Database endpoints
 @app.get("/databases", response_model=List[DatabaseResponse])
-async def list_databases():
+async def list_databases(current_user: dict = Depends(get_current_user_dependency)):
     """Получить список доступных баз данных"""
     try:
         databases = get_databases()
@@ -106,7 +157,7 @@ async def list_databases():
         raise HTTPException(status_code=500, detail=f"Ошибка получения списка БД: {str(e)}")
 
 @app.get("/databases/{database_id}/tables", response_model=List[TableResponse])
-async def list_tables(database_id: str):
+async def list_tables(database_id: str, current_user: dict = Depends(get_current_user_dependency)):
     """Получить список таблиц для базы данных"""
     try:
         tables = get_tables(database_id.upper())
@@ -115,7 +166,7 @@ async def list_tables(database_id: str):
         raise HTTPException(status_code=500, detail=f"Ошибка получения списка таблиц: {str(e)}")
 
 @app.get("/databases/{database_id}/tables/{table_name}/columns", response_model=List[ColumnResponse])
-async def list_columns(database_id: str, table_name: str):
+async def list_columns(database_id: str, table_name: str, current_user: dict = Depends(get_current_user_dependency)):
     """Получить список столбцов для таблицы"""
     try:
         columns = get_table_columns(database_id.upper(), table_name.upper())
@@ -124,7 +175,7 @@ async def list_columns(database_id: str, table_name: str):
         raise HTTPException(status_code=500, detail=f"Ошибка получения столбцов: {str(e)}")
 
 @app.post("/databases/test-connection", response_model=ConnectionTestResponse)
-async def test_db_connection(request: Optional[ConnectionTestRequest] = None):
+async def test_db_connection(request: Optional[ConnectionTestRequest] = None, current_user: dict = Depends(get_current_user_dependency)):
     """Тестирование подключения к базе данных"""
     try:
         result = test_connection()
@@ -136,9 +187,9 @@ async def test_db_connection(request: Optional[ConnectionTestRequest] = None):
             "connected": False
         }
 
-# Query endpoints
+# Protected Query endpoints
 @app.post("/query/execute", response_model=QueryResultResponse)
-async def execute_database_query(request: QueryRequest):
+async def execute_database_query(request: QueryRequest, current_user: dict = Depends(get_current_user_dependency)):
     """Выполнение запроса к базе данных"""
     try:
         start_time = time.time()
@@ -153,7 +204,7 @@ async def execute_database_query(request: QueryRequest):
         execution_time = f"{(time.time() - start_time):.3f}s"
         
         if result["success"]:
-            # Add to query history
+            # Add to query history with user info
             query_history.append({
                 "id": len(query_history) + 1,
                 "sql": sql_query,
@@ -162,7 +213,8 @@ async def execute_database_query(request: QueryRequest):
                 "execution_time": execution_time,
                 "status": "success",
                 "created_at": datetime.now(),
-                "row_count": result["row_count"]
+                "row_count": result["row_count"],
+                "user": current_user["username"]
             })
             
             return QueryResultResponse(
@@ -183,7 +235,8 @@ async def execute_database_query(request: QueryRequest):
                 "execution_time": execution_time,
                 "status": "error",
                 "created_at": datetime.now(),
-                "row_count": 0
+                "row_count": 0,
+                "user": current_user["username"]
             })
             
             return QueryResultResponse(
@@ -198,52 +251,8 @@ async def execute_database_query(request: QueryRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Ошибка выполнения запроса: {str(e)}")
 
-@app.get("/query/history", response_model=List[QueryHistoryResponse])
-async def get_query_history(
-    page: int = Query(1, ge=1),
-    limit: int = Query(10, ge=1, le=100)
-):
-    """Получить историю запросов"""
-    start_idx = (page - 1) * limit
-    end_idx = start_idx + limit
-    
-    # Sort by most recent first
-    sorted_history = sorted(query_history, key=lambda x: x["created_at"], reverse=True)
-    paginated_history = sorted_history[start_idx:end_idx]
-    
-    return paginated_history
-
-@app.post("/query/save", response_model=SavedQueryResponse)
-async def save_query(request: SaveQueryRequest):
-    """Сохранить запрос"""
-    saved_query = {
-        "id": len(saved_queries) + 1,
-        "name": request.name,
-        "description": request.description,
-        "sql": request.sql,
-        "database_id": request.database_id,
-        "table": request.table,
-        "created_at": datetime.now(),
-        "updated_at": None
-    }
-    
-    saved_queries.append(saved_query)
-    return saved_query
-
-@app.get("/query/saved", response_model=List[SavedQueryResponse])
-async def get_saved_queries():
-    """Получить сохраненные запросы"""
-    return saved_queries
-
-@app.delete("/query/saved/{query_id}")
-async def delete_saved_query(query_id: int):
-    """Удалить сохраненный запрос"""
-    global saved_queries
-    saved_queries = [q for q in saved_queries if q["id"] != query_id]
-    return {"message": "Запрос удален"}
-
 @app.post("/query/count")
-async def get_query_count(request: QueryRequest):
+async def get_query_count(request: QueryRequest, current_user: dict = Depends(get_current_user_dependency)):
     """Получить количество строк для запроса с фильтрами"""
     try:
         start_time = time.time()
@@ -288,7 +297,54 @@ async def get_query_count(request: QueryRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Ошибка получения количества строк: {str(e)}")
 
-# Data endpoints
+# Remaining endpoints with authentication protection...
+@app.get("/query/history", response_model=List[QueryHistoryResponse])
+async def get_query_history(
+    page: int = Query(1, ge=1),
+    limit: int = Query(10, ge=1, le=100),
+    current_user: dict = Depends(get_current_user_dependency)
+):
+    """Получить историю запросов"""
+    start_idx = (page - 1) * limit
+    end_idx = start_idx + limit
+    
+    # Sort by most recent first
+    sorted_history = sorted(query_history, key=lambda x: x["created_at"], reverse=True)
+    paginated_history = sorted_history[start_idx:end_idx]
+    
+    return paginated_history
+
+@app.post("/query/save", response_model=SavedQueryResponse)
+async def save_query(request: SaveQueryRequest, current_user: dict = Depends(get_current_user_dependency)):
+    """Сохранить запрос"""
+    saved_query = {
+        "id": len(saved_queries) + 1,
+        "name": request.name,
+        "description": request.description,
+        "sql": request.sql,
+        "database_id": request.database_id,
+        "table": request.table,
+        "created_at": datetime.now(),
+        "updated_at": None,
+        "user": current_user["username"]
+    }
+    
+    saved_queries.append(saved_query)
+    return saved_query
+
+@app.get("/query/saved", response_model=List[SavedQueryResponse])
+async def get_saved_queries(current_user: dict = Depends(get_current_user_dependency)):
+    """Получить сохраненные запросы"""
+    return saved_queries
+
+@app.delete("/query/saved/{query_id}")
+async def delete_saved_query(query_id: int, current_user: dict = Depends(get_current_user_dependency)):
+    """Удалить сохраненный запрос"""
+    global saved_queries
+    saved_queries = [q for q in saved_queries if q["id"] != query_id]
+    return {"message": "Запрос удален"}
+
+# Protected Data endpoints
 @app.get("/data", response_model=DataResponse)
 async def get_data(
     database_id: str = Query(..., description="Database ID"),
@@ -298,6 +354,7 @@ async def get_data(
     search: Optional[str] = Query(None),
     sort_by: Optional[str] = Query(None),
     sort_order: str = Query("asc"),
+    current_user: dict = Depends(get_current_user_dependency)
 ):
     """Получить данные с фильтрами и пагинацией"""
     try:
@@ -355,6 +412,7 @@ async def export_data(
     database_id: str = Query(..., description="Database ID"),
     table: str = Query(..., description="Table name"),
     format: str = Query("csv", description="Export format"),
+    current_user: dict = Depends(get_current_user_dependency)
 ):
     """Экспорт данных"""
     try:
@@ -403,7 +461,7 @@ async def export_data(
         raise HTTPException(status_code=500, detail=f"Ошибка экспорта: {str(e)}")
 
 @app.get("/data/stats/{table_name}")
-async def get_data_stats(table_name: str, database_id: str = Query("dssb_app")):
+async def get_data_stats(table_name: str, database_id: str = Query("dssb_app"), current_user: dict = Depends(get_current_user_dependency)):
     """Получить статистику данных"""
     try:
         # Get table row count
@@ -423,22 +481,29 @@ async def get_data_stats(table_name: str, database_id: str = Query("dssb_app")):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Ошибка получения статистики: {str(e)}")
 
-# Settings endpoints
+# Protected Settings endpoints
 @app.get("/settings", response_model=SettingsResponse)
-async def get_settings():
+async def get_settings(current_user: dict = Depends(get_current_user_dependency)):
     """Получить настройки приложения"""
     return app_settings
 
 @app.put("/settings", response_model=SettingsResponse)
-async def update_settings(settings: SettingsResponse):
+async def update_settings(settings: SettingsResponse, current_user: dict = Depends(get_current_user_dependency)):
     """Обновить настройки приложения"""
+    # Check admin permissions
+    if 'admin' not in current_user.get('permissions', []):
+        raise HTTPException(
+            status_code=403,
+            detail="Only admin users can modify settings"
+        )
+    
     global app_settings
     app_settings = settings.dict()
     return app_settings
 
 # Dashboard stats endpoint
 @app.get("/stats", response_model=StatsResponse)
-async def get_dashboard_stats():
+async def get_dashboard_stats(current_user: dict = Depends(get_current_user_dependency)):
     """Получить статистику для панели управления"""
     return StatsResponse(
         total_queries=len(query_history),

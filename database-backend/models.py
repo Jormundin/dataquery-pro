@@ -13,11 +13,11 @@ class QueryRequest(BaseModel):
     limit: Optional[int] = 100
 
 class ConnectionTestRequest(BaseModel):
-    host: str
-    port: str
-    sid: str
-    username: str
-    password: str
+    host: Optional[str] = None
+    port: Optional[int] = None
+    database: Optional[str] = None
+    username: Optional[str] = None
+    password: Optional[str] = None
 
 class SaveQueryRequest(BaseModel):
     name: str
@@ -35,36 +35,59 @@ class DataRequest(BaseModel):
     sort_order: Optional[str] = "asc"
     filters: Optional[Dict[str, Any]] = None
 
+# Authentication Models
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+class LoginResponse(BaseModel):
+    access_token: str
+    token_type: str
+    user: Dict[str, Any]
+    expires_in: int
+
+class UserResponse(BaseModel):
+    username: str
+    name: str
+    role: str
+    permissions: List[str]
+
 # Response Models
 class DatabaseResponse(BaseModel):
     id: str
     name: str
-    description: str
-    status: str
+    description: Optional[str] = None
 
 class TableResponse(BaseModel):
     name: str
-    description: str
-    columns_count: int
+    description: Optional[str] = None
+    columns_count: Optional[int] = None
 
 class ColumnResponse(BaseModel):
     name: str
     type: str
-    description: str
-
-class ConnectionTestResponse(BaseModel):
-    status: str
-    message: str
-    connected: bool
+    description: Optional[str] = None
+    nullable: Optional[bool] = True
+    options: Optional[List[str]] = None
 
 class QueryResultResponse(BaseModel):
     success: bool
     columns: Optional[List[str]] = None
     data: Optional[List[Dict[str, Any]]] = None
     row_count: Optional[int] = None
-    message: str
-    execution_time: Optional[str] = None
+    message: Optional[str] = None
     error: Optional[str] = None
+    execution_time: Optional[str] = None
+
+class QueryHistoryResponse(BaseModel):
+    id: int
+    sql: str
+    database_id: str
+    table: str
+    execution_time: str
+    status: str
+    created_at: datetime
+    row_count: int
 
 class SavedQueryResponse(BaseModel):
     id: int
@@ -75,6 +98,12 @@ class SavedQueryResponse(BaseModel):
     table: str
     created_at: datetime
     updated_at: Optional[datetime] = None
+
+class ConnectionTestResponse(BaseModel):
+    status: str
+    message: str
+    connected: bool
+    response_time: Optional[str] = None
 
 class DataResponse(BaseModel):
     data: List[Dict[str, Any]]
@@ -88,16 +117,6 @@ class StatsResponse(BaseModel):
     active_databases: int
     total_users: int
     avg_response_time: str
-
-class QueryHistoryResponse(BaseModel):
-    id: int
-    sql: str
-    database_id: str
-    table: str
-    execution_time: str
-    status: str
-    created_at: datetime
-    row_count: Optional[int] = None
 
 # Settings Models
 class DatabaseSettings(BaseModel):

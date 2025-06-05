@@ -1,51 +1,157 @@
 import React from 'react';
-import { NavLink } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { 
   BarChart3, 
   Database, 
-  Search, 
+  Eye, 
   Settings, 
-  Home 
+  User, 
+  LogOut,
+  Shield
 } from 'lucide-react';
 
-const Layout = ({ children }) => {
-  const navigation = [
-    { name: 'Панель управления', href: '/', icon: Home },
-    { name: 'Конструктор запросов', href: '/query-builder', icon: Search },
-    { name: 'Просмотр данных', href: '/data-viewer', icon: BarChart3 },
-    { name: 'Настройки', href: '/settings', icon: Settings },
+const Layout = ({ user, onLogout, children }) => {
+  const location = useLocation();
+
+  const navigationItems = [
+    { path: '/dashboard', label: 'Панель управления', icon: BarChart3 },
+    { path: '/query-builder', label: 'Конструктор запросов', icon: Database },
+    { path: '/data-viewer', label: 'Просмотр данных', icon: Eye },
+    { path: '/settings', label: 'Настройки', icon: Settings },
   ];
+
+  const handleLogout = () => {
+    if (window.confirm('Вы уверены, что хотите выйти из системы?')) {
+      onLogout();
+    }
+  };
 
   return (
     <div className="app-layout">
-      <div className="sidebar">
+      <aside className="sidebar">
         <div className="sidebar-header">
-          <h1 className="sidebar-title">
-            <Database className="nav-icon" style={{ display: 'inline', marginRight: '0.5rem' }} />
-            DataQuery Pro
-          </h1>
+          <h1 className="sidebar-title">DataQuery Pro</h1>
+          <p style={{ fontSize: '0.875rem', color: '#94a3b8', marginTop: '0.5rem' }}>
+            Oracle Database Interface
+          </p>
         </div>
-        <nav>
-          <ul className="nav-menu">
-            {navigation.map((item) => {
-              const Icon = item.icon;
-              return (
-                <li key={item.name} className="nav-item">
-                  <NavLink
-                    to={item.href}
-                    className={({ isActive }) => 
-                      `nav-link ${isActive ? 'active' : ''}`
-                    }
-                  >
-                    <Icon className="nav-icon" />
-                    {item.name}
-                  </NavLink>
-                </li>
-              );
-            })}
-          </ul>
+
+        <nav className="nav-menu">
+          {navigationItems.map((item) => {
+            const Icon = item.icon;
+            const isActive = location.pathname === item.path;
+            
+            return (
+              <Link
+                key={item.path}
+                to={item.path}
+                className={`nav-link ${isActive ? 'active' : ''}`}
+              >
+                <Icon className="nav-icon" />
+                {item.label}
+              </Link>
+            );
+          })}
         </nav>
-      </div>
+
+        {/* User Info Section */}
+        <div style={{ 
+          marginTop: 'auto', 
+          padding: '1.5rem 2rem 2rem 2rem',
+          borderTop: '1px solid #334155'
+        }}>
+          {/* User Profile */}
+          <div style={{ 
+            display: 'flex', 
+            alignItems: 'center', 
+            marginBottom: '1rem',
+            padding: '0.75rem',
+            backgroundColor: '#334155',
+            borderRadius: '8px'
+          }}>
+            <div style={{
+              width: '40px',
+              height: '40px',
+              backgroundColor: '#3b82f6',
+              borderRadius: '50%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              marginRight: '0.75rem'
+            }}>
+              <User size={20} color="white" />
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ 
+                color: 'white', 
+                fontWeight: '600',
+                fontSize: '0.875rem',
+                lineHeight: '1.2'
+              }}>
+                {user?.name || 'User'}
+              </div>
+              <div style={{ 
+                color: '#94a3b8', 
+                fontSize: '0.75rem',
+                lineHeight: '1.2'
+              }}>
+                {user?.username}
+              </div>
+              <div style={{ 
+                display: 'flex', 
+                alignItems: 'center', 
+                marginTop: '0.25rem'
+              }}>
+                <Shield size={12} style={{ marginRight: '0.25rem', color: '#10b981' }} />
+                <span style={{ 
+                  color: '#10b981', 
+                  fontSize: '0.75rem',
+                  textTransform: 'capitalize'
+                }}>
+                  {user?.role || 'user'}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Authentication Info */}
+          <div style={{ 
+            fontSize: '0.75rem', 
+            color: '#94a3b8', 
+            marginBottom: '1rem',
+            textAlign: 'center'
+          }}>
+            🔐 LDAP Authentication
+          </div>
+
+          {/* Logout Button */}
+          <button
+            onClick={handleLogout}
+            style={{
+              width: '100%',
+              padding: '0.75rem',
+              backgroundColor: '#dc2626',
+              color: 'white',
+              border: 'none',
+              borderRadius: '6px',
+              fontSize: '0.875rem',
+              fontWeight: '500',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '0.5rem',
+              transition: 'background-color 0.2s ease'
+            }}
+            onMouseOver={(e) => e.target.style.backgroundColor = '#b91c1c'}
+            onMouseOut={(e) => e.target.style.backgroundColor = '#dc2626'}
+          >
+            <LogOut size={16} />
+            Выйти из системы
+          </button>
+        </div>
+      </aside>
+
       <main className="main-content">
         {children}
       </main>
