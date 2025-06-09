@@ -199,6 +199,54 @@ def get_next_theory_id():
         # Return 1 if table doesn't exist yet
         return 1
 
+def create_theory_with_custom_id(theory_name, theory_description, theory_start_date, theory_end_date, user_iins, created_by, custom_theory_id):
+    """Create a new theory with a custom theory ID (for stratification sub-IDs)"""
+    try:
+        connection = get_connection_DSSB_APP()
+        cursor = connection.cursor()
+        
+        # Insert theory records for each user with custom ID
+        insert_sql = """
+        INSERT INTO SoftCollection_theories 
+        (IIN, theory_name, theory_description, load_date, theory_start_date, theory_end_date, theory_id, created_by)
+        VALUES (:1, :2, :3, SYSDATE, TO_DATE(:4, 'YYYY-MM-DD'), TO_DATE(:5, 'YYYY-MM-DD'), :6, :7)
+        """
+        
+        users_added = 0
+        for iin in user_iins:
+            try:
+                cursor.execute(insert_sql, (
+                    iin, 
+                    theory_name, 
+                    theory_description,
+                    theory_start_date,
+                    theory_end_date,
+                    custom_theory_id,
+                    created_by
+                ))
+                users_added += 1
+            except Exception as e:
+                print(f"Error inserting IIN {iin}: {e}")
+                continue
+        
+        connection.commit()
+        cursor.close()
+        connection.close()
+        
+        return {
+            "success": True,
+            "message": f"Theory '{theory_name}' created successfully with ID {custom_theory_id}",
+            "theory_id": custom_theory_id,
+            "users_added": users_added
+        }
+        
+    except Exception as e:
+        print(f"Error creating theory with custom ID: {e}")
+        return {
+            "success": False,
+            "message": f"Failed to create theory: {str(e)}"
+        }
+
 def create_theory(theory_name, theory_description, theory_start_date, theory_end_date, user_iins, created_by):
     """Create a new theory with user assignments"""
     try:

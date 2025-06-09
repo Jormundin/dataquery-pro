@@ -412,7 +412,8 @@ const QueryBuilder = () => {
         setError(null);
         
         const totalUsers = response.theories.reduce((sum, theory) => sum + (theory.users_added || 0), 0);
-        alert(`Стратификация завершена успешно!\n\nСоздано ${response.theories.length} теорий:\n${response.theories.map((theory, index) => `• ${theory.theory_name} (${theory.users_added || 0} пользователей)`).join('\n')}\n\nВсего пользователей: ${totalUsers}`);
+        const baseId = response.base_theory_id || 'N/A';
+        alert(`Стратификация завершена успешно!\n\nБазовый ID стратификации: ${baseId}\nСоздано ${response.theories.length} теорий:\n${response.theories.map((theory, index) => `• ID ${theory.theory_id}: ${theory.theory_name} (${theory.users_added || 0} пользователей)`).join('\n')}\n\nВсего пользователей: ${totalUsers}`);
         
         // Reset query results to show stratification was completed
         setQueryResults(null);

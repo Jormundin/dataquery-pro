@@ -29,12 +29,9 @@ load_dotenv()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
-    print("🚀 DataQuery Pro Backend запущен")
-    print("📊 Подключение к Oracle Database настроено")
-    print("🔐 LDAP Authentication настроен")
     yield
     # Shutdown
-    print("👋 DataQuery Pro Backend остановлен")
+    pass
 
 app = FastAPI(
     title="DataQuery Pro API",
@@ -389,54 +386,29 @@ async def detect_iins_in_results(data: Dict[str, Any], current_user: dict = Depe
 async def stratify_and_create_theories(data: Dict[str, Any], current_user: dict = Depends(get_current_user_dependency)):
     """Стратификация данных и создание нескольких теорий"""
     try:
-        print(f"📊 Начало стратификации для пользователя: {current_user.get('username', 'unknown')}")
-        
         query_data = data.get("queryData")
         stratification_config = data.get("stratificationConfig")
         
-        print(f"📋 Получены данные: query_data={'present' if query_data else 'missing'}, config={'present' if stratification_config else 'missing'}")
-        print(f"🔍 Query Data содержит: {query_data}")
-        if query_data:
-            print(f"   - Database ID: {query_data.get('database_id')}")
-            print(f"   - Table: {query_data.get('table')}")
-            print(f"   - Limit: {query_data.get('limit')}")
-            print(f"   - Filters: {len(query_data.get('filters', []))} фильтров")
-            print(f"   - Columns: {query_data.get('columns')}")
-            print(f"   - Sort: {query_data.get('sort_by')} {query_data.get('sort_order', 'ASC')}")
-        
         if not query_data or not stratification_config:
             raise HTTPException(status_code=400, detail="Отсутствуют данные запроса или конфигурация стратификации")
-        
-        # Log stratification configuration
-        print(f"⚙️ Конфигурация стратификации:")
-        print(f"   - Групп: {stratification_config.get('numGroups', 'не указано')}")
-        print(f"   - Колонки: {stratification_config.get('stratifyColumns', 'не указано')}")
-        print(f"   - IIN колонка: {stratification_config.get('iinColumn', 'не указано')}")
 
         # First execute the query to get the data
         start_time = time.time()
-        print("📊 Выполняется запрос для получения данных...")
         
         try:
             sql_query = query_builder.build_query(query_data)
-            print(f"🔍 SQL запрос: {sql_query[:200]}..." if len(sql_query) > 200 else f"🔍 SQL запрос: {sql_query}")
         except Exception as e:
-            print(f"❌ Ошибка построения SQL запроса: {str(e)}")
             raise HTTPException(status_code=500, detail=f"Ошибка построения SQL запроса: {str(e)}")
         
         try:
             result = execute_query(sql_query)
-            print(f"✅ Запрос выполнен: success={result.get('success', False)}, rows={len(result.get('data', []))}")
         except Exception as e:
-            print(f"❌ Ошибка выполнения запроса: {str(e)}")
             raise HTTPException(status_code=500, detail=f"Ошибка выполнения запроса: {str(e)}")
         
         if not result["success"]:
-            print(f"❌ Запрос неуспешен: {result.get('message', 'неизвестная ошибка')}")
             raise HTTPException(status_code=500, detail=f"Ошибка выполнения запроса: {result['message']}")
         
         if not result["data"]:
-            print("⚠️ Запрос не возвратил данных")
             raise HTTPException(status_code=400, detail="Запрос не возвратил данных для стратификации")
         
         # Check if required dependencies are available
@@ -445,13 +417,10 @@ async def stratify_and_create_theories(data: Dict[str, Any], current_user: dict 
             import numpy as np
             from sklearn.model_selection import StratifiedKFold
             from scipy.stats import ks_2samp
-            print("✅ Все зависимости для стратификации доступны")
         except ImportError as e:
-            print(f"❌ Отсутствует зависимость: {str(e)}")
             raise HTTPException(status_code=500, detail=f"Отсутствует зависимость для стратификации: {str(e)}")
 
         # Prepare data for stratification
-        print("🔧 Подготовка данных для стратификации...")
         stratification_request = {
             "data": result["data"],
             "columns": result["columns"],
@@ -460,13 +429,6 @@ async def stratify_and_create_theories(data: Dict[str, Any], current_user: dict 
             "replace_nan": True,
             "random_state": stratification_config.get("randomSeed", 42)
         }
-        
-        print(f"📊 Данные для стратификации:")
-        print(f"   - Строк данных: {len(stratification_request['data'])}")
-        print(f"   - Колонок: {len(stratification_request['columns'])}")
-        print(f"   - Фактические колонки: {stratification_request['columns']}")
-        print(f"   - Запрошенные колонки для стратификации: {stratification_request['stratify_cols']}")
-        print(f"   - Количество групп: {stratification_request['n_splits']}")
         
         # Check for case sensitivity issues and fix column names
         actual_columns = stratification_request['columns']
@@ -480,64 +442,48 @@ async def stratify_and_create_theories(data: Dict[str, Any], current_user: dict 
                     column_mapping[requested_col] = actual_col
                     break
         
-        print(f"🔍 Сопоставление колонок: {column_mapping}")
-        
         # Update stratify_cols with the actual column names
         fixed_stratify_cols = []
         for requested_col in requested_stratify_cols:
             if requested_col in column_mapping:
                 fixed_stratify_cols.append(column_mapping[requested_col])
-                print(f"   ✅ Колонка '{requested_col}' найдена как '{column_mapping[requested_col]}'")
             else:
-                print(f"   ❌ Колонка '{requested_col}' не найдена среди: {actual_columns}")
                 raise HTTPException(status_code=400, detail=f"Колонка '{requested_col}' не найдена. Доступные колонки: {actual_columns}")
         
         # Update the stratification request with corrected column names
         stratification_request['stratify_cols'] = fixed_stratify_cols
-        print(f"   🔧 Исправленные колонки для стратификации: {fixed_stratify_cols}")
 
         # Also fix the IIN column name
         iin_column = stratification_config.get("iinColumn")
         if iin_column:
             for actual_col in actual_columns:
                 if actual_col.upper() == iin_column.upper():
-                    print(f"   ✅ IIN колонка '{iin_column}' найдена как '{actual_col}'")
                     # Update the config for later use
                     stratification_config["iinColumn"] = actual_col
                     break
-            else:
-                print(f"   ⚠️ IIN колонка '{iin_column}' не найдена среди: {actual_columns}")
 
         # Call local stratification function
-        print("🎯 Вызов функции стратификации...")
         try:
             from stratification import stratify_data
             stratification_result = stratify_data(stratification_request)
-            print(f"✅ Стратификация выполнена успешно: {len(stratification_result.get('stratified_groups', []))} групп создано")
         except ImportError as e:
-            print(f"❌ Ошибка импорта модуля стратификации: {str(e)}")
             raise HTTPException(status_code=500, detail=f"Ошибка импорта модуля стратификации: {str(e)}")
         except Exception as e:
-            import traceback
-            error_traceback = traceback.format_exc()
-            print(f"❌ Ошибка в процессе стратификации: {str(e)}")
-            print(f"📄 Трейсбек: {error_traceback}")
             raise HTTPException(status_code=500, detail=f"Ошибка стратификации: {str(e)}")
         
         # Create theories for each stratified group
-        print("🏗️ Создание теорий для каждой группы...")
         try:
-            from database import create_theory
-            print("✅ Функция create_theory импортирована")
+            from database import create_theory_with_custom_id, get_next_theory_id
         except ImportError as e:
-            print(f"❌ Ошибка импорта create_theory: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"Ошибка импорта функции создания теории: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Ошибка импорта функций создания теории: {str(e)}")
+        
+        # Get base theory ID for this stratification
+        base_theory_id = get_next_theory_id()
         
         created_theories = []
         
         for i, group in enumerate(stratification_result.get("stratified_groups", [])):
             group_letter = chr(65 + i)  # A, B, C, D, E
-            print(f"👥 Обработка группы {group_letter}: {group.get('num_rows', 0)} записей")
             
             # Extract IIN values from the group data
             iin_column = stratification_config.get("iinColumn")
@@ -547,9 +493,6 @@ async def stratify_and_create_theories(data: Dict[str, Any], current_user: dict 
                 for row in group.get("data", []):
                     if iin_column in row and row[iin_column]:
                         iin_values.append(str(row[iin_column]))
-                print(f"   - Извлечено IIN значений: {len(iin_values)}")
-            else:
-                print(f"   - IIN колонка не указана")
             
             # Create theory data
             theory_name = f"{stratification_config.get('theoryBaseName', 'Стратифицированная теория')} - Группа {group_letter}"
@@ -558,63 +501,57 @@ async def stratify_and_create_theories(data: Dict[str, Any], current_user: dict 
             theory_end_date = stratification_config.get("theoryEndDate")
             created_by = current_user["username"]
             
-            print(f"   - Название теории: {theory_name}")
+            # Create sub-ID for this group (e.g., 1.1, 1.2, 1.3)
+            sub_theory_id = f"{base_theory_id}.{i + 1}"
             
-            # Insert theory using correct function signature
+            # Insert theory using custom ID function
             try:
-                theory_result = create_theory(
+                theory_result = create_theory_with_custom_id(
                     theory_name,
                     theory_description,
                     theory_start_date,
                     theory_end_date,
                     iin_values,
-                    created_by
+                    created_by,
+                    sub_theory_id
                 )
                 
                 if theory_result.get("success"):
-                    print(f"   ✅ Теория создана: ID={theory_result.get('theory_id', 'не получен')}")
                     created_theories.append({
                         "theory_id": theory_result.get("theory_id"),
                         "theory_name": theory_name,
                         "users_added": theory_result.get("users_added", 0),
                         "group": group_letter,
                         "proportion": group.get("proportion", 0),
-                        "num_rows": group.get("num_rows", 0)
+                        "num_rows": group.get("num_rows", 0),
+                        "sub_id": sub_theory_id
                     })
                 else:
-                    print(f"   ❌ Не удалось создать теорию для группы {group_letter}: {theory_result.get('message', 'неизвестная ошибка')}")
                     continue
                     
             except Exception as e:
-                print(f"   ❌ Ошибка создания теории для группы {group_letter}: {str(e)}")
                 # Continue with other groups even if one fails
                 continue
         
         if not created_theories:
-            print("❌ Не удалось создать ни одной теории")
             raise HTTPException(status_code=500, detail="Не удалось создать ни одной теории")
         
         execution_time = time.time() - start_time
-        print(f"🎉 Стратификация завершена успешно за {execution_time:.3f}s: {len(created_theories)} теорий создано")
         
         return {
             "success": True,
-            "message": f"Успешно создано {len(created_theories)} теорий через стратификацию",
+            "message": f"Успешно создано {len(created_theories)} теорий через стратификацию с базовым ID {base_theory_id}",
             "stratification": stratification_result,
             "theories": created_theories,
             "execution_time": f"{execution_time:.3f}s",
-            "total_users": sum(theory["users_added"] for theory in created_theories)
+            "total_users": sum(theory["users_added"] for theory in created_theories),
+            "base_theory_id": base_theory_id
         }
         
     except HTTPException as he:
         # Re-raise HTTP exceptions as-is
-        print(f"🔄 HTTP Exception: {he.detail}")
         raise he
     except Exception as e:
-        import traceback
-        error_traceback = traceback.format_exc()
-        print(f"💥 Неожиданная ошибка стратификации: {str(e)}")
-        print(f"📄 Полный трейсбек: {error_traceback}")
         raise HTTPException(status_code=500, detail=f"Неожиданная ошибка стратификации: {str(e)}")
 
 # Remaining endpoints with authentication protection...
