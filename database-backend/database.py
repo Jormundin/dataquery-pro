@@ -180,23 +180,36 @@ def execute_query(sql: str, params: Dict = None) -> Dict:
 
 # Theory Management Functions
 def get_next_theory_id():
-    """Get next available theory ID"""
+    """Get next available theory ID for stratification base ID"""
     try:
         connection = get_connection_DSSB_APP()
         cursor = connection.cursor()
         
-        cursor.execute("SELECT NVL(MAX(theory_id), 0) + 1 FROM SoftCollection_theories")
+        # Since theory_id is now VARCHAR2, we need to find the highest numeric base ID
+        # This handles both old numeric IDs (1, 2, 3) and new decimal IDs (4.1, 4.2, 4.3)
+        cursor.execute("""
+        SELECT NVL(MAX(
+            CASE 
+                WHEN INSTR(theory_id, '.') > 0 THEN 
+                    TO_NUMBER(SUBSTR(theory_id, 1, INSTR(theory_id, '.') - 1))
+                ELSE 
+                    TO_NUMBER(theory_id)
+            END
+        ), 0) + 1 
+        FROM SoftCollection_theories
+        WHERE REGEXP_LIKE(theory_id, '^[0-9]+(\.[0-9]+)?$')
+        """)
         result = cursor.fetchone()
         next_id = result[0] if result else 1
         
         cursor.close()
         connection.close()
         
-        return next_id
+        return int(next_id)
         
     except Exception as e:
         print(f"Error getting next theory ID: {e}")
-        # Return 1 if table doesn't exist yet
+        # Return a safe default
         return 1
 
 def create_theory_with_custom_id(theory_name, theory_description, theory_start_date, theory_end_date, user_iins, created_by, custom_theory_id):
@@ -305,6 +318,7 @@ def get_active_theories():
         cursor = connection.cursor()
         
         # Get theories that are currently active
+        # Updated to handle VARCHAR2 theory_id with proper sorting
         query = """
         SELECT 
             theory_id,
@@ -318,7 +332,19 @@ def get_active_theories():
             MAX(created_by) as created_by
         FROM SoftCollection_theories
         GROUP BY theory_id, theory_name, theory_description, theory_start_date, theory_end_date
-        ORDER BY theory_start_date DESC
+        ORDER BY 
+            theory_start_date DESC,
+            CASE 
+                WHEN REGEXP_LIKE(theory_id, '^[0-9]+(\.[0-9]+)?$') THEN
+                    CASE 
+                        WHEN INSTR(theory_id, '.') > 0 THEN 
+                            TO_NUMBER(SUBSTR(theory_id, 1, INSTR(theory_id, '.') - 1))
+                        ELSE 
+                            TO_NUMBER(theory_id)
+                    END
+                ELSE 999999
+            END DESC,
+            theory_id
         """
         
         cursor.execute(query)
