@@ -401,7 +401,7 @@ const QueryBuilder = () => {
         filters: filters.filter(f => f.column && f.value),
         sort_by: sortBy,
         sort_order: sortOrder,
-        limit: 10000 // Increase limit for stratification
+        limit: limit // Use the user's selected limit
       };
 
       const response = await databaseAPI.stratifyAndCreateTheories(queryData, stratificationConfig);
