@@ -11,7 +11,8 @@ import {
 import { dataAPI, databaseAPI } from '../services/api';
 
 const DataViewer = () => {
-  const [searchTerm, setSearchTerm] = useState('');
+  const [searchInput, setSearchInput] = useState(''); // Input value for search box
+  const [searchTerm, setSearchTerm] = useState(''); // Actual search term used for API calls
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(25);
   const [sortColumn, setSortColumn] = useState('');
@@ -24,17 +25,7 @@ const DataViewer = () => {
   const [tables, setTables] = useState([]);
   const [columns, setColumns] = useState([]);
 
-  // Default columns (will be updated dynamically based on table)
-  const getDefaultColumns = () => [
-    { key: 'id', label: 'ID', type: 'number' },
-    { key: 'first_name', label: 'Имя', type: 'text' },
-    { key: 'last_name', label: 'Фамилия', type: 'text' },
-    { key: 'email', label: 'Email', type: 'email' },
-    { key: 'department', label: 'Отдел', type: 'text' },
-    { key: 'salary', label: 'Зарплата', type: 'currency' },
-    { key: 'hire_date', label: 'Дата найма', type: 'date' },
-    { key: 'status', label: 'Статус', type: 'badge' },
-  ];
+  // No default columns - will be loaded dynamically from actual table structure
 
   useEffect(() => {
     loadTables();
@@ -75,8 +66,8 @@ const DataViewer = () => {
       setColumns(formattedColumns);
     } catch (err) {
       console.error('Error loading table columns:', err);
-      // Fallback to default columns
-      setColumns(getDefaultColumns());
+      setError('Ошибка загрузки столбцов таблицы: ' + (err.response?.data?.detail || err.message));
+      setColumns([]);
     }
   };
 
@@ -107,23 +98,26 @@ const DataViewer = () => {
       };
 
       const response = await dataAPI.getData(params);
-      setData(response.data.data || []);
+      const responseData = response.data.data || [];
+      setData(responseData);
+
+      // If no columns are defined but we have data, create columns from the first row
+      if (columns.length === 0 && responseData.length > 0) {
+        const firstRow = responseData[0];
+        const autoColumns = Object.keys(firstRow).map(key => ({
+          key: key,
+          label: key.toUpperCase(),
+          type: 'text' // Default to text type
+        }));
+        setColumns(autoColumns);
+      }
       
     } catch (err) {
       console.error('Error loading data:', err);
       setError('Ошибка загрузки данных: ' + (err.response?.data?.detail || err.message));
       
-      // Fallback to mock data if API fails
-      setData([
-        { id: 1, first_name: 'Иван', last_name: 'Петров', email: 'ivan@example.com', department: 'Продажи', salary: 75000, hire_date: '2020-01-15', status: 'active' },
-        { id: 2, first_name: 'Мария', last_name: 'Смирнова', email: 'maria@example.com', department: 'Маркетинг', salary: 68000, hire_date: '2019-03-20', status: 'active' },
-        { id: 3, first_name: 'Алексей', last_name: 'Иванов', email: 'alex@example.com', department: 'ИТ', salary: 82000, hire_date: '2021-07-10', status: 'active' },
-        { id: 4, first_name: 'Анна', last_name: 'Козлова', email: 'anna@example.com', department: 'HR', salary: 62000, hire_date: '2018-11-05', status: 'inactive' },
-        { id: 5, first_name: 'Сергей', last_name: 'Волков', email: 'sergey@example.com', department: 'Финансы', salary: 78000, hire_date: '2020-09-12', status: 'active' },
-        { id: 6, first_name: 'Елена', last_name: 'Павлова', email: 'elena@example.com', department: 'Продажи', salary: 71000, hire_date: '2019-12-03', status: 'active' },
-        { id: 7, first_name: 'Дмитрий', last_name: 'Соколов', email: 'dmitry@example.com', department: 'ИТ', salary: 85000, hire_date: '2021-02-18', status: 'active' },
-        { id: 8, first_name: 'Ольга', last_name: 'Морозова', email: 'olga@example.com', department: 'Маркетинг', salary: 64000, hire_date: '2020-06-25', status: 'inactive' },
-      ]);
+      // Set empty data when API fails - no dummy data
+      setData([]);
     } finally {
       setIsLoading(false);
     }
@@ -184,15 +178,56 @@ const DataViewer = () => {
     }
   };
 
+  // Handle search button click
+  const handleSearch = () => {
+    setSearchTerm(searchInput);
+    setCurrentPage(1); // Reset to first page when searching
+  };
+
+  // Handle clear search
+  const handleClearSearch = () => {
+    setSearchInput('');
+    setSearchTerm('');
+    setCurrentPage(1);
+  };
+
+  // Handle Enter key press in search input
+  const handleSearchKeyPress = (e) => {
+    if (e.key === 'Enter') {
+      handleSearch();
+    }
+  };
+
   const formatCellValue = (value, type) => {
+    // Handle null, undefined, or empty values
+    if (value === null || value === undefined || value === '') {
+      return <span style={{ color: '#9ca3af', fontStyle: 'italic' }}>—</span>;
+    }
+
     switch (type) {
       case 'currency':
-        return new Intl.NumberFormat('ru-RU', {
-          style: 'currency',
-          currency: 'RUB'
-        }).format(value);
+        if (typeof value === 'number') {
+          return new Intl.NumberFormat('ru-RU', {
+            style: 'currency',
+            currency: 'RUB'
+          }).format(value);
+        }
+        return value;
+      case 'number':
+        if (typeof value === 'number') {
+          return new Intl.NumberFormat('ru-RU').format(value);
+        }
+        return value;
       case 'date':
-        return new Date(value).toLocaleDateString('ru-RU');
+        try {
+          const date = new Date(value);
+          if (isNaN(date.getTime())) {
+            return value; // Return original value if not a valid date
+          }
+          return date.toLocaleDateString('ru-RU');
+        } catch (error) {
+          return value; // Return original value if date parsing fails
+        }
       case 'badge':
         return (
           <span className={`badge ${value === 'active' ? 'badge-success' : 'badge-warning'}`}>
@@ -200,7 +235,7 @@ const DataViewer = () => {
           </span>
         );
       default:
-        return value;
+        return String(value);
     }
   };
 
@@ -272,6 +307,9 @@ const DataViewer = () => {
               setSelectedTable(e.target.value);
               setCurrentPage(1);
               setSelectedRows([]);
+              // Clear search when changing tables
+              setSearchInput('');
+              setSearchTerm('');
             }}
           >
             <option value="">Выберите таблицу для просмотра...</option>
@@ -291,27 +329,50 @@ const DataViewer = () => {
             <div className="card-header">
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flex: 1 }}>
-                  <div style={{ position: 'relative', minWidth: '300px' }}>
-                    <Search 
-                      className="search-icon" 
-                      style={{ 
-                        position: 'absolute', 
-                        left: '0.75rem', 
-                        top: '50%', 
-                        transform: 'translateY(-50%)', 
-                        width: '16px', 
-                        height: '16px', 
-                        color: '#6b7280' 
-                      }} 
-                    />
-                    <input
-                      type="text"
-                      placeholder="Поиск по всем столбцам..."
-                      className="form-input"
-                      style={{ paddingLeft: '2.5rem' }}
-                      value={searchTerm}
-                      onChange={(e) => setSearchTerm(e.target.value)}
-                    />
+                  {/* Search Section */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: '350px' }}>
+                    <div style={{ position: 'relative', flex: 1 }}>
+                      <Search 
+                        className="search-icon" 
+                        style={{ 
+                          position: 'absolute', 
+                          left: '0.75rem', 
+                          top: '50%', 
+                          transform: 'translateY(-50%)', 
+                          width: '16px', 
+                          height: '16px', 
+                          color: '#6b7280' 
+                        }} 
+                      />
+                      <input
+                        type="text"
+                        placeholder="Поиск по всем столбцам..."
+                        className="form-input"
+                        style={{ paddingLeft: '2.5rem' }}
+                        value={searchInput}
+                        onChange={(e) => setSearchInput(e.target.value)}
+                        onKeyPress={handleSearchKeyPress}
+                      />
+                    </div>
+                    <button 
+                      className="btn btn-primary"
+                      onClick={handleSearch}
+                      disabled={isLoading}
+                      style={{ whiteSpace: 'nowrap' }}
+                    >
+                      <Search className="nav-icon" style={{ width: '16px', height: '16px' }} />
+                      Поиск
+                    </button>
+                    {searchTerm && (
+                      <button 
+                        className="btn btn-secondary"
+                        onClick={handleClearSearch}
+                        disabled={isLoading}
+                        style={{ whiteSpace: 'nowrap' }}
+                      >
+                        Очистить
+                      </button>
+                    )}
                   </div>
                   
                   <select
@@ -372,7 +433,7 @@ const DataViewer = () => {
             }}>
               <div>
                 Показано {startIndex + 1} до {Math.min(startIndex + rowsPerPage, sortedData.length)} из {sortedData.length} записей
-                {searchTerm && ` (отфильтровано из ${data.length} всего)`}
+                {searchTerm && ` (поиск: "${searchTerm}")`}
               </div>
               {selectedRows.length > 0 && (
                 <div>
@@ -383,8 +444,9 @@ const DataViewer = () => {
           </div>
 
           {/* Data Table */}
-          <div className="table-container">
-            <table className="table">
+          {columns.length > 0 ? (
+            <div className="table-container">
+              <table className="table">
               <thead>
                 <tr>
                   <th style={{ width: '50px' }}>
@@ -441,15 +503,42 @@ const DataViewer = () => {
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={columns.length + 2} className="empty-state">
-                      <Filter className="empty-state-icon" />
-                      <p>Данные, соответствующие критериям поиска, не найдены</p>
+                    <td colSpan={columns.length + 2} style={{ textAlign: 'center', padding: '3rem', color: '#6b7280' }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem' }}>
+                        <Filter size={48} style={{ opacity: 0.3 }} />
+                        <div>
+                          <p style={{ margin: 0, fontSize: '1.1rem', fontWeight: '500' }}>
+                            {searchTerm ? 'Данные не найдены' : 'Таблица пуста'}
+                          </p>
+                          <small style={{ opacity: 0.7 }}>
+                            {searchTerm 
+                              ? 'Попробуйте изменить критерии поиска' 
+                              : 'В выбранной таблице нет данных'
+                            }
+                          </small>
+                        </div>
+                      </div>
                     </td>
                   </tr>
                 )}
               </tbody>
             </table>
-          </div>
+            </div>
+          ) : (
+            <div className="card" style={{ textAlign: 'center', padding: '3rem', color: '#6b7280' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem' }}>
+                <Filter size={48} style={{ opacity: 0.3 }} />
+                <div>
+                  <p style={{ margin: 0, fontSize: '1.1rem', fontWeight: '500' }}>
+                    Таблица не выбрана
+                  </p>
+                  <small style={{ opacity: 0.7 }}>
+                    Выберите таблицу из списка выше для просмотра данных
+                  </small>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Pagination */}
           {totalPages > 1 && (

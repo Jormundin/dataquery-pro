@@ -6,7 +6,10 @@ import {
   Database, 
   Filter,
   Download,
-  RefreshCw
+  RefreshCw,
+  Layers,
+  Users,
+  Target
 } from 'lucide-react';
 import { databaseAPI, queryBuilder } from '../services/api';
 
@@ -38,6 +41,22 @@ const QueryBuilder = () => {
   });
   const [iinInfo, setIinInfo] = useState(null);
   const [isCreatingTheory, setIsCreatingTheory] = useState(false);
+
+  // Stratification state
+  const [showStratificationModal, setShowStratificationModal] = useState(false);
+  const [stratificationConfig, setStratificationConfig] = useState({
+    enabled: false,
+    numGroups: 2,
+    stratifyColumns: [],
+    theoryBaseName: '',
+    theoryDescription: '',
+    theoryStartDate: '',
+    theoryEndDate: '',
+    iinColumn: '',
+    randomSeed: 42
+  });
+  const [isStratifying, setIsStratifying] = useState(false);
+  const [stratificationResults, setStratificationResults] = useState(null);
 
   useEffect(() => {
     loadDatabases();
@@ -325,6 +344,102 @@ const QueryBuilder = () => {
       setError('Ошибка создания теории: ' + (err.response?.data?.detail || err.message));
     } finally {
       setIsCreatingTheory(false);
+    }
+  };
+
+  // Stratification functions
+  const openStratificationModal = () => {
+    if (!iinInfo?.has_iin_column) {
+      setError('В результатах запроса не найдена IIN колонка для стратификации');
+      return;
+    }
+    
+    // Set default dates
+    const today = new Date().toISOString().split('T')[0];
+    const nextYear = new Date();
+    nextYear.setFullYear(nextYear.getFullYear() + 1);
+    const endDate = nextYear.toISOString().split('T')[0];
+    
+    setStratificationConfig({
+      ...stratificationConfig,
+      theoryStartDate: today,
+      theoryEndDate: endDate,
+      iinColumn: iinInfo.iin_column,
+      theoryBaseName: 'Стратифицированная теория',
+      theoryDescription: 'Теория создана через стратификацию данных'
+    });
+    
+    setShowStratificationModal(true);
+  };
+
+  const performStratification = async () => {
+    if (!stratificationConfig.theoryBaseName || !stratificationConfig.theoryStartDate || 
+        !stratificationConfig.theoryEndDate || stratificationConfig.stratifyColumns.length === 0) {
+      setError('Пожалуйста, заполните все обязательные поля стратификации');
+      return;
+    }
+
+    if (new Date(stratificationConfig.theoryStartDate) >= new Date(stratificationConfig.theoryEndDate)) {
+      setError('Дата окончания должна быть позже даты начала');
+      return;
+    }
+
+    if (stratificationConfig.numGroups < 2 || stratificationConfig.numGroups > 5) {
+      setError('Количество групп должно быть от 2 до 5');
+      return;
+    }
+
+    setIsStratifying(true);
+    setError(null);
+
+    try {
+      // Prepare query data for stratification
+      const queryData = {
+        database_id: selectedDatabase,
+        table: selectedTable,
+        columns: selectedColumns.length > 0 ? selectedColumns : columns.map(col => col.name),
+        filters: filters.filter(f => f.column && f.value),
+        sort_by: sortBy,
+        sort_order: sortOrder,
+        limit: 10000 // Increase limit for stratification
+      };
+
+      const response = await databaseAPI.stratifyAndCreateTheories(queryData, stratificationConfig);
+
+      if (response.success) {
+        setStratificationResults(response);
+        setShowStratificationModal(false);
+        setError(null);
+        
+        const totalUsers = response.theories.reduce((sum, theory) => sum + (theory.users_added || 0), 0);
+        alert(`Стратификация завершена успешно!\n\nСоздано ${response.theories.length} теорий:\n${response.theories.map((theory, index) => `• ${theory.theory_name} (${theory.users_added || 0} пользователей)`).join('\n')}\n\nВсего пользователей: ${totalUsers}`);
+        
+        // Reset query results to show stratification was completed
+        setQueryResults(null);
+      } else {
+        setError('Ошибка стратификации: ' + response.message);
+      }
+    } catch (err) {
+      console.error('Error during stratification:', err);
+      setError('Ошибка стратификации: ' + (err.response?.data?.detail || err.message));
+    } finally {
+      setIsStratifying(false);
+    }
+  };
+
+  const updateStratificationConfig = (field, value) => {
+    setStratificationConfig({
+      ...stratificationConfig,
+      [field]: value
+    });
+  };
+
+  const toggleStratifyColumn = (columnName) => {
+    const currentColumns = stratificationConfig.stratifyColumns;
+    if (currentColumns.includes(columnName)) {
+      updateStratificationConfig('stratifyColumns', currentColumns.filter(col => col !== columnName));
+    } else {
+      updateStratificationConfig('stratifyColumns', [...currentColumns, columnName]);
     }
   };
 
@@ -735,8 +850,103 @@ const QueryBuilder = () => {
               🧪 Создать теорию ({iinInfo.user_count} польз.)
             </button>
           )}
+          
+          {iinInfo?.has_iin_column && (
+            <button 
+              className="btn btn-info"
+              onClick={openStratificationModal}
+              style={{ backgroundColor: '#06b6d4', borderColor: '#06b6d4' }}
+            >
+              <Layers className="nav-icon" style={{ width: '16px', height: '16px' }} />
+              Стратификация ({iinInfo.user_count} польз.)
+            </button>
+          )}
         </div>
       </div>
+
+      {/* Stratification Results */}
+      {stratificationResults && (
+        <div className="card">
+          <div className="card-header">
+            <h2 className="card-title">
+              <Layers className="nav-icon" style={{ width: '20px', height: '20px', display: 'inline', marginRight: '0.5rem' }} />
+              Результаты стратификации
+            </h2>
+            <div style={{ fontSize: '0.875rem', color: '#6b7280' }}>
+              {stratificationResults.theories.length} групп создано • {stratificationResults.theories.reduce((sum, theory) => sum + (theory.users_added || 0), 0)} пользователей всего
+            </div>
+          </div>
+          
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '1rem', padding: '1rem' }}>
+            {stratificationResults.theories.map((theory, index) => {
+              const groupLetter = String.fromCharCode(65 + index);
+              const stratGroup = stratificationResults.stratification.stratified_groups[index];
+              
+              return (
+                <div key={index} className="card" style={{ backgroundColor: '#f8fafc', border: '2px solid #e2e8f0' }}>
+                  <div className="card-header" style={{ paddingBottom: '0.5rem' }}>
+                    <h3 style={{ fontSize: '1.1rem', color: '#1f2937', margin: 0 }}>
+                      <Target className="nav-icon" style={{ width: '16px', height: '16px', display: 'inline', marginRight: '0.5rem' }} />
+                      Группа {groupLetter}
+                    </h3>
+                  </div>
+                  
+                  <div style={{ padding: '0 1rem 1rem 1rem' }}>
+                    <div style={{ marginBottom: '0.75rem' }}>
+                      <div style={{ fontSize: '0.875rem', color: '#374151', fontWeight: '500' }}>
+                        {theory.theory_name}
+                      </div>
+                      <div style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.25rem' }}>
+                        ID: {theory.theory_id}
+                      </div>
+                    </div>
+                    
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', fontSize: '0.75rem' }}>
+                      <div>
+                        <span style={{ color: '#6b7280' }}>Пользователи:</span>
+                        <div style={{ fontWeight: '600', color: '#059669' }}>
+                          <Users className="nav-icon" style={{ width: '12px', height: '12px', display: 'inline', marginRight: '0.25rem' }} />
+                          {theory.users_added || stratGroup?.num_rows || 0}
+                        </div>
+                      </div>
+                      <div>
+                        <span style={{ color: '#6b7280' }}>Доля:</span>
+                        <div style={{ fontWeight: '600', color: '#3b82f6' }}>
+                          {((stratGroup?.proportion || 0) * 100).toFixed(1)}%
+                        </div>
+                      </div>
+                    </div>
+                    
+                    {stratGroup?.test_statistics && (
+                      <div style={{ marginTop: '0.75rem', padding: '0.5rem', backgroundColor: '#f0f9ff', borderRadius: '4px', border: '1px solid #bfdbfe' }}>
+                        <div style={{ fontSize: '0.75rem', color: '#1e40af', fontWeight: '500', marginBottom: '0.25rem' }}>
+                          Статистические тесты:
+                        </div>
+                        {Object.entries(stratGroup.test_statistics).slice(0, 2).map(([col, stats]) => (
+                          <div key={col} style={{ fontSize: '0.625rem', color: '#374151' }}>
+                            <span style={{ fontWeight: '500' }}>{col}:</span> p={((stats.p_value || 0)).toFixed(3)}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          
+          <div style={{ padding: '1rem', borderTop: '1px solid #e5e7eb', backgroundColor: '#f9fafb' }}>
+            <div style={{ fontSize: '0.875rem', color: '#374151' }}>
+              <strong>Конфигурация стратификации:</strong>
+            </div>
+            <div style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.25rem' }}>
+              Колонки для стратификации: {stratificationResults.stratification.stratify_cols?.join(', ') || 'N/A'}
+              • Метод: {stratificationResults.stratification.split_method || 'equal_kfold'}
+              • Тестовые колонки: {stratificationResults.stratification.ks_test_columns?.join(', ') || 'N/A'}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Query Results */}
       {queryResults && (
@@ -854,6 +1064,173 @@ const QueryBuilder = () => {
                 disabled={isCreatingTheory || !theoryData.theory_name}
               >
                 {isCreatingTheory ? 'Создание...' : 'Создать теорию'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Stratification Modal */}
+      {showStratificationModal && (
+        <div className="modal-overlay" onClick={() => setShowStratificationModal(false)}>
+          <div className="modal-content" style={{ maxWidth: '700px' }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>
+                <Layers className="nav-icon" style={{ width: '20px', height: '20px', display: 'inline', marginRight: '0.5rem' }} />
+                Стратификация данных
+              </h3>
+              <button 
+                className="modal-close"
+                onClick={() => setShowStratificationModal(false)}
+              >
+                ×
+              </button>
+            </div>
+            
+            <div className="modal-body" style={{ maxHeight: '70vh', overflowY: 'auto' }}>
+              <div style={{ marginBottom: '1rem', padding: '1rem', backgroundColor: '#f0f9ff', border: '1px solid #0ea5e9', borderRadius: '6px' }}>
+                <div style={{ fontSize: '0.875rem', color: '#0369a1' }}>
+                  📊 <strong>IIN колонка:</strong> {iinInfo?.iin_column}
+                </div>
+                <div style={{ fontSize: '0.875rem', color: '#0369a1', marginTop: '0.25rem' }}>
+                  👥 <strong>Пользователей для стратификации:</strong> {iinInfo?.user_count}
+                </div>
+                <div style={{ fontSize: '0.75rem', color: '#0369a1', marginTop: '0.5rem' }}>
+                  💡 Стратификация разделит данные на {stratificationConfig.numGroups} сбалансированные группы (A, B, C, D, E) и создаст отдельную теорию для каждой группы.
+                </div>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Количество групп *</label>
+                <select
+                  className="form-select"
+                  value={stratificationConfig.numGroups}
+                  onChange={(e) => updateStratificationConfig('numGroups', parseInt(e.target.value))}
+                >
+                  <option value={2}>2 группы (A, B)</option>
+                  <option value={3}>3 группы (A, B, C)</option>
+                  <option value={4}>4 группы (A, B, C, D)</option>
+                  <option value={5}>5 групп (A, B, C, D, E)</option>
+                </select>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Колонки для стратификации *</label>
+                <div style={{ fontSize: '0.75rem', color: '#6b7280', marginBottom: '0.5rem' }}>
+                  Выберите колонки, по которым будет выполняться стратификация (балансировка групп)
+                </div>
+                <div style={{ maxHeight: '150px', overflowY: 'auto', border: '1px solid #d1d5db', borderRadius: '6px', padding: '0.5rem' }}>
+                  {columns.filter(col => col.name !== iinInfo?.iin_column).map(column => (
+                    <div key={column.name} style={{ marginBottom: '0.5rem' }}>
+                      <label style={{ display: 'flex', alignItems: 'center', fontSize: '0.875rem' }}>
+                        <input
+                          type="checkbox"
+                          checked={stratificationConfig.stratifyColumns.includes(column.name)}
+                          onChange={() => toggleStratifyColumn(column.name)}
+                          style={{ marginRight: '0.5rem' }}
+                        />
+                        <span>{column.name} ({column.type})</span>
+                      </label>
+                      <div style={{ fontSize: '0.75rem', color: '#6b7280', marginLeft: '1.5rem' }}>
+                        {column.description}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                {stratificationConfig.stratifyColumns.length === 0 && (
+                  <div style={{ fontSize: '0.75rem', color: '#dc2626', marginTop: '0.25rem' }}>
+                    Выберите хотя бы одну колонку для стратификации
+                  </div>
+                )}
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Базовое название теории *</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  value={stratificationConfig.theoryBaseName}
+                  onChange={(e) => updateStratificationConfig('theoryBaseName', e.target.value)}
+                  placeholder="Название теории (будет добавлен суффикс группы)"
+                />
+                <div style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.25rem' }}>
+                  К названию будет добавлен суффикс группы: "- Группа A", "- Группа B", и т.д.
+                </div>
+              </div>
+              
+              <div className="form-group">
+                <label className="form-label">Описание теории</label>
+                <textarea
+                  className="form-input"
+                  rows="3"
+                  value={stratificationConfig.theoryDescription}
+                  onChange={(e) => updateStratificationConfig('theoryDescription', e.target.value)}
+                  placeholder="Описание теории (будет добавлена информация о группе)"
+                />
+              </div>
+              
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                <div className="form-group">
+                  <label className="form-label">Дата начала *</label>
+                  <input
+                    type="date"
+                    className="form-input"
+                    value={stratificationConfig.theoryStartDate}
+                    onChange={(e) => updateStratificationConfig('theoryStartDate', e.target.value)}
+                  />
+                </div>
+                
+                <div className="form-group">
+                  <label className="form-label">Дата окончания *</label>
+                  <input
+                    type="date"
+                    className="form-input"
+                    value={stratificationConfig.theoryEndDate}
+                    onChange={(e) => updateStratificationConfig('theoryEndDate', e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Случайное зерно</label>
+                <input
+                  type="number"
+                  className="form-input"
+                  value={stratificationConfig.randomSeed}
+                  onChange={(e) => updateStratificationConfig('randomSeed', parseInt(e.target.value))}
+                  placeholder="42"
+                />
+                <div style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.25rem' }}>
+                  Для воспроизводимости результатов стратификации
+                </div>
+              </div>
+            </div>
+            
+            <div className="modal-footer">
+              <button 
+                className="btn btn-secondary"
+                onClick={() => setShowStratificationModal(false)}
+                disabled={isStratifying}
+              >
+                Отмена
+              </button>
+              <button 
+                className="btn btn-primary"
+                onClick={performStratification}
+                disabled={isStratifying || !stratificationConfig.theoryBaseName || stratificationConfig.stratifyColumns.length === 0}
+                style={{ backgroundColor: '#06b6d4', borderColor: '#06b6d4' }}
+              >
+                {isStratifying ? (
+                  <>
+                    <RefreshCw className="nav-icon" style={{ width: '16px', height: '16px', animation: 'spin 1s linear infinite', marginRight: '0.5rem' }} />
+                    Стратификация...
+                  </>
+                ) : (
+                  <>
+                    <Layers className="nav-icon" style={{ width: '16px', height: '16px', marginRight: '0.5rem' }} />
+                    Создать {stratificationConfig.numGroups} теории
+                  </>
+                )}
               </button>
             </div>
           </div>

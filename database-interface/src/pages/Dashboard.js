@@ -56,55 +56,16 @@ const Dashboard = () => {
       console.error('Error loading dashboard data:', err);
       setError('Ошибка загрузки данных. Проверьте соединение с сервером.');
       
-      // Fallback to mock data if API fails
+      // Set empty data when API fails - no dummy data
       setStats({
-        totalQueries: 1247,
-        activeDatabases: 8,
-        totalUsers: 0, // Don't show hardcoded user count
-        avgResponseTime: '0.8s'
+        totalQueries: 0,
+        activeDatabases: 0,
+        totalUsers: 0,
+        avgResponseTime: 'Н/Д'
       });
       
-      setRecentQueries([
-        { 
-          id: 1, 
-          sql: 'Анализ клиентских данных', 
-          table: 'customers', 
-          created_at: new Date(Date.now() - 2 * 60 * 1000).toISOString(),
-          status: 'success',
-          user: 'admin'
-        },
-        { 
-          id: 2, 
-          sql: 'Отчет по продажам за 4 квартал', 
-          table: 'sales', 
-          created_at: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
-          status: 'success',
-          user: 'analyst'
-        },
-        { 
-          id: 3, 
-          sql: 'Аудит прав пользователей', 
-          table: 'users', 
-          created_at: new Date(Date.now() - 12 * 60 * 1000).toISOString(),
-          status: 'pending',
-          user: 'admin'
-        },
-        { 
-          id: 4, 
-          sql: 'Проверка уровня запасов', 
-          table: 'inventory', 
-          created_at: new Date(Date.now() - 18 * 60 * 1000).toISOString(),
-          status: 'success',
-          user: 'manager'
-        },
-      ]);
-      
-      setDatabases([
-        { name: 'Продуктивная БД', status: 'active', tables: 24, lastAccess: '2 мин назад' },
-        { name: 'Аналитическая БД', status: 'active', tables: 12, lastAccess: '5 мин назад' },
-        { name: 'Управление пользователями', status: 'active', tables: 8, lastAccess: '1 час назад' },
-        { name: 'БД логов', status: 'maintenance', tables: 6, lastAccess: '3 часа назад' },
-      ]);
+      setRecentQueries([]); // Empty array - no dummy data
+      setDatabases([]); // Empty array - no dummy data
     } finally {
       setIsLoading(false);
     }
@@ -261,8 +222,12 @@ const Dashboard = () => {
                       ))
                     ) : (
                       <tr>
-                        <td colSpan="5" style={{ textAlign: 'center', color: '#6b7280' }}>
-                          Нет данных о запросах
+                        <td colSpan="5" style={{ textAlign: 'center', color: '#6b7280', padding: '2rem' }}>
+                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem' }}>
+                            <Search size={32} style={{ opacity: 0.3 }} />
+                            <span>Нет данных о запросах</span>
+                            <small style={{ opacity: 0.7 }}>Выполните запрос для отображения истории</small>
+                          </div>
                         </td>
                       </tr>
                     )}
@@ -291,8 +256,12 @@ const Dashboard = () => {
                     </div>
                   ))
                 ) : (
-                  <div style={{ textAlign: 'center', color: '#6b7280', padding: '1rem' }}>
-                    Нет доступных баз данных
+                  <div style={{ textAlign: 'center', color: '#6b7280', padding: '2rem' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem' }}>
+                      <Database size={32} style={{ opacity: 0.3 }} />
+                      <span>Нет доступных баз данных</span>
+                      <small style={{ opacity: 0.7 }}>Проверьте подключение к серверу</small>
+                    </div>
                   </div>
                 )}
               </div>

@@ -6,67 +6,39 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
-# Hardcoded list of allowed tables for security
+# Hardcoded list of tables that frontend has access to
 ALLOWED_TABLES = {
-    'dssb_app': {
-        # Real Oracle tables with schema prefix
+    'DSSB_APP': {
         'DSSB_DM.RB_CLIENTS': {
-            'description': 'Клиенты банка',
+            'description': 'Информация о клиентах',
             'columns': [
-                {'name': 'CLIENT_ID', 'type': 'NUMBER', 'description': 'ID клиента'},
-                {'name': 'CLIENT_NAME', 'type': 'VARCHAR2', 'description': 'Имя клиента'},
-                {'name': 'CLIENT_TYPE', 'type': 'VARCHAR2', 'description': 'Тип клиента'},
-                {'name': 'REGISTRATION_DATE', 'type': 'DATE', 'description': 'Дата регистрации'},
-                {'name': 'STATUS', 'type': 'VARCHAR2', 'description': 'Статус'}
+                {'name': 'SNAPSHOT_DATE', 'type': 'DATE', 'description': 'DATE'},
+                {'name': 'OCRM_DWH_ID', 'type': 'NUMBER', 'description': 'ID'},
+                {'name': 'GM_SYSTEM_CODE', 'type': 'VARCHAR2', 'description': 'ID'},
+                {'name': 'IIN_BIN', 'type': 'NUMBER', 'description': 'ID'},
+                {'name': 'OCRM_ID', 'type': 'VARCHAR2', 'description': 'ID'},
+                {'name': 'LAST_NAME', 'type': 'VARCHAR2', 'description': 'NAME'},
+                {'name': 'FIRST_NAME', 'type': 'VARCHAR2', 'description': 'NAME'},
+                {'name': 'MIDDLE_NAME', 'type': 'VARCHAR2', 'description': 'NAME'},
+                {'name': 'LONG_NAME', 'type': 'VARCHAR2', 'description': 'NAME'},
+                {'name': 'SEX_CODE', 'type': 'VARCHAR2', 'description': 'Статус'},
+                {'name': 'MARITAL_STATUS', 'type': 'VARCHAR2', 'description': 'Статус'},
+                {'name': 'BIRTH_DATE', 'type': 'DATE', 'description': 'DATE'},
+                {'name': 'CITY_RESIDENCE', 'type': 'VARCHAR2', 'description': 'NAME'},
+                {'name': 'AGE', 'type': 'DATE', 'description': 'DATE'},
             ]
         },
-        'DSSB_DM.RB_ACCOUNTS': {
-            'description': 'Банковские счета',
+        'DSSB_APP.SoftCollection_theories': {
+            'description': 'Информация о теориях Soft Collection',
             'columns': [
-                {'name': 'ACCOUNT_ID', 'type': 'NUMBER', 'description': 'ID счета'},
-                {'name': 'CLIENT_ID', 'type': 'NUMBER', 'description': 'ID клиента'},
-                {'name': 'ACCOUNT_NUMBER', 'type': 'VARCHAR2', 'description': 'Номер счета'},
-                {'name': 'ACCOUNT_TYPE', 'type': 'VARCHAR2', 'description': 'Тип счета'},
-                {'name': 'BALANCE', 'type': 'NUMBER', 'description': 'Баланс'},
-                {'name': 'CURRENCY', 'type': 'VARCHAR2', 'description': 'Валюта'},
-                {'name': 'OPEN_DATE', 'type': 'DATE', 'description': 'Дата открытия'},
-                {'name': 'STATUS', 'type': 'VARCHAR2', 'description': 'Статус счета'}
-            ]
-        },
-        'DSSB_DM.RB_TRANSACTIONS': {
-            'description': 'Банковские операции',
-            'columns': [
-                {'name': 'TRANSACTION_ID', 'type': 'NUMBER', 'description': 'ID операции'},
-                {'name': 'ACCOUNT_ID', 'type': 'NUMBER', 'description': 'ID счета'},
-                {'name': 'TRANSACTION_DATE', 'type': 'DATE', 'description': 'Дата операции'},
-                {'name': 'AMOUNT', 'type': 'NUMBER', 'description': 'Сумма'},
-                {'name': 'TRANSACTION_TYPE', 'type': 'VARCHAR2', 'description': 'Тип операции'},
-                {'name': 'DESCRIPTION', 'type': 'VARCHAR2', 'description': 'Описание'},
-                {'name': 'STATUS', 'type': 'VARCHAR2', 'description': 'Статус операции'}
-            ]
-        },
-        'DSSB_DM.RB_PRODUCTS': {
-            'description': 'Банковские продукты',
-            'columns': [
-                {'name': 'PRODUCT_ID', 'type': 'NUMBER', 'description': 'ID продукта'},
-                {'name': 'PRODUCT_NAME', 'type': 'VARCHAR2', 'description': 'Название продукта'},
-                {'name': 'PRODUCT_TYPE', 'type': 'VARCHAR2', 'description': 'Тип продукта'},
-                {'name': 'INTEREST_RATE', 'type': 'NUMBER', 'description': 'Процентная ставка'},
-                {'name': 'MIN_AMOUNT', 'type': 'NUMBER', 'description': 'Минимальная сумма'},
-                {'name': 'MAX_AMOUNT', 'type': 'NUMBER', 'description': 'Максимальная сумма'},
-                {'name': 'CURRENCY', 'type': 'VARCHAR2', 'description': 'Валюта'},
-                {'name': 'STATUS', 'type': 'VARCHAR2', 'description': 'Статус продукта'}
-            ]
-        },
-        'DSSB_DM.RB_REPORTS': {
-            'description': 'Отчеты',
-            'columns': [
-                {'name': 'REPORT_ID', 'type': 'NUMBER', 'description': 'ID отчета'},
-                {'name': 'REPORT_NAME', 'type': 'VARCHAR2', 'description': 'Название отчета'},
-                {'name': 'REPORT_TYPE', 'type': 'VARCHAR2', 'description': 'Тип отчета'},
-                {'name': 'CREATION_DATE', 'type': 'DATE', 'description': 'Дата создания'},
-                {'name': 'REPORT_DATA', 'type': 'CLOB', 'description': 'Данные отчета'},
-                {'name': 'STATUS', 'type': 'VARCHAR2', 'description': 'Статус отчета'}
+                {'name': 'IIN', 'type': 'VARCHAR2', 'description': 'ID'},
+                {'name': 'THEORY_NAME', 'type': 'VARCHAR2', 'description': 'ID'},
+                {'name': 'THEORY_DESCRIPTION', 'type': 'VARCHAR2', 'description': 'ID'},
+                {'name': 'LOAD_DATE', 'type': 'DATE', 'description': 'ID'},
+                {'name': 'THEORY_START_DATE', 'type': 'DATE', 'description': 'ID'},
+                {'name': 'THEORY_END_DATE', 'type': 'DATE', 'description': 'NAME'},
+                {'name': 'THEORY_ID', 'type': 'VARCHAR2', 'description': 'NAME'},
+                {'name': 'CREATED_BY', 'type': 'VARCHAR2', 'description': 'NAME'},
             ]
         }
     }

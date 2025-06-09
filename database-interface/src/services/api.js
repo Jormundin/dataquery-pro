@@ -124,6 +124,22 @@ export const databaseAPI = {
   
   detectIINs: (resultsData) => 
     api.post('/theories/detect-iins', resultsData),
+
+  // Stratification and bulk theory creation
+  stratifyAndCreateTheories: async (queryData, stratificationConfig) => {
+    try {
+      const response = await api.post('/theories/stratify-and-create', {
+        queryData: queryData,
+        stratificationConfig: stratificationConfig
+      });
+
+      return response.data;
+
+    } catch (error) {
+      console.error('Stratification and theory creation error:', error);
+      throw error;
+    }
+  }
 };
 
 // Data API endpoints
@@ -267,56 +283,26 @@ export const queryBuilder = {
 };
 
 // Utility functions
-export const utils = {
-  // Format error messages for display
-  formatError: (error) => {
-    if (error.response?.data?.message) {
-      return error.response.data.message;
-    }
-    if (error.response?.data?.detail) {
-      return error.response.data.detail;
-    }
-    if (error.message) {
-      return error.message;
-    }
-    return 'An unexpected error occurred';
-  },
-  
-  // Download file from blob
-  downloadBlob: (blob, filename) => {
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    window.URL.revokeObjectURL(url);
-  },
-  
-  // Format data for display
-  formatCellValue: (value, type) => {
-    if (value === null || value === undefined) {
-      return '-';
-    }
-    
-    switch (type) {
-      case 'currency':
-        return new Intl.NumberFormat('en-US', {
-          style: 'currency',
-          currency: 'USD'
-        }).format(value);
-      case 'number':
-        return new Intl.NumberFormat('en-US').format(value);
-      case 'date':
-        return new Date(value).toLocaleDateString();
-      case 'datetime':
-        return new Date(value).toLocaleString();
-      case 'boolean':
-        return value ? 'Yes' : 'No';
-      default:
-        return String(value);
-    }
+export const formatNumber = (num) => {
+  if (!num && num !== 0) return 'N/A';
+  return new Intl.NumberFormat('ru-RU').format(num);
+};
+
+export const formatDate = (dateString) => {
+  if (!dateString) return 'N/A';
+  try {
+    return new Date(dateString).toLocaleDateString('ru-RU');
+  } catch {
+    return 'Invalid Date';
+  }
+};
+
+export const formatDateTime = (dateString) => {
+  if (!dateString) return 'N/A';
+  try {
+    return new Date(dateString).toLocaleString('ru-RU');
+  } catch {
+    return 'Invalid Date';
   }
 };
 

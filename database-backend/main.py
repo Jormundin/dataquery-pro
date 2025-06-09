@@ -20,6 +20,7 @@ from database import (
 )
 from query_builder import QueryBuilder
 from auth import authenticate_user, create_access_token, get_current_user, ACCESS_TOKEN_EXPIRE_MINUTES
+from stratification import stratify_data
 
 # Load environment variables
 load_dotenv()
@@ -59,41 +60,7 @@ security = HTTPBearer()
 query_builder = QueryBuilder()
 
 # In-memory storage for demo purposes
-query_history = [
-    {
-        "id": 1,
-        "sql": "SELECT * FROM employees WHERE department = 'IT'",
-        "database_id": "CORPORATE",
-        "table": "employees",
-        "execution_time": "0.245s",
-        "status": "success",
-        "created_at": datetime.now() - timedelta(minutes=5),
-        "row_count": 45,
-        "user": "admin"
-    },
-    {
-        "id": 2,
-        "sql": "SELECT COUNT(*) FROM sales WHERE sale_date >= '2024-01-01'",
-        "database_id": "ANALYTICS",
-        "table": "sales",
-        "execution_time": "0.156s",
-        "status": "success",
-        "created_at": datetime.now() - timedelta(minutes=15),
-        "row_count": 1,
-        "user": "analyst"
-    },
-    {
-        "id": 3,
-        "sql": "SELECT * FROM users WHERE status = 'active'",
-        "database_id": "CORPORATE",
-        "table": "users",
-        "execution_time": "0.089s",
-        "status": "success",
-        "created_at": datetime.now() - timedelta(hours=1),
-        "row_count": 156,
-        "user": "manager"
-    }
-]
+query_history = []
 saved_queries = []
 app_settings = {
     "database": {
@@ -417,6 +384,102 @@ async def detect_iins_in_results(data: Dict[str, Any], current_user: dict = Depe
             
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Ошибка анализа результатов: {str(e)}")
+
+@app.post("/theories/stratify-and-create")
+async def stratify_and_create_theories(data: Dict[str, Any], current_user: dict = Depends(get_current_user_dependency)):
+    """Стратификация данных и создание нескольких теорий"""
+    try:
+        query_data = data.get("queryData")
+        stratification_config = data.get("stratificationConfig")
+        
+        if not query_data or not stratification_config:
+            raise HTTPException(status_code=400, detail="Отсутствуют данные запроса или конфигурация стратификации")
+        
+        # First execute the query to get the data
+        start_time = time.time()
+        sql_query = query_builder.build_query(query_data)
+        result = execute_query(sql_query)
+        
+        if not result["success"]:
+            raise HTTPException(status_code=500, detail=f"Ошибка выполнения запроса: {result['message']}")
+        
+        if not result["data"]:
+            raise HTTPException(status_code=400, detail="Запрос не возвратил данных для стратификации")
+        
+        # Prepare data for stratification
+        stratification_request = {
+            "data": result["data"],
+            "columns": result["columns"],
+            "n_splits": stratification_config.get("numGroups", 2),
+            "stratify_cols": stratification_config.get("stratifyColumns", []),
+            "replace_nan": True,
+            "random_state": stratification_config.get("randomSeed", 42)
+        }
+        
+        # Call local stratification function
+        try:
+            stratification_result = stratify_data(stratification_request)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Ошибка стратификации: {str(e)}")
+        
+        # Create theories for each stratified group
+        from database import insert_theory_bulk
+        created_theories = []
+        
+        for i, group in enumerate(stratification_result.get("stratified_groups", [])):
+            group_letter = chr(65 + i)  # A, B, C, D, E
+            
+            # Extract IIN values from the group data
+            iin_column = stratification_config.get("iinColumn")
+            iin_values = []
+            
+            if iin_column:
+                for row in group.get("data", []):
+                    if iin_column in row and row[iin_column]:
+                        iin_values.append(str(row[iin_column]))
+            
+            # Create theory data
+            theory_data = {
+                "theory_name": f"{stratification_config.get('theoryBaseName', 'Стратифицированная теория')} - Группа {group_letter}",
+                "theory_description": f"{stratification_config.get('theoryDescription', 'Теория создана через стратификацию данных')} (Группа {group_letter} - {group.get('num_rows', 0)} записей, пропорция: {group.get('proportion', 0):.3f})",
+                "theory_start_date": stratification_config.get("theoryStartDate"),
+                "theory_end_date": stratification_config.get("theoryEndDate"),
+                "user": current_user["username"],
+                "user_iins": iin_values
+            }
+            
+            # Insert theory
+            try:
+                theory_result = insert_theory_bulk(theory_data)
+                created_theories.append({
+                    "theory_id": theory_result.get("theory_id"),
+                    "theory_name": theory_data["theory_name"],
+                    "users_added": len(iin_values),
+                    "group": group_letter,
+                    "proportion": group.get("proportion", 0),
+                    "num_rows": group.get("num_rows", 0)
+                })
+            except Exception as e:
+                print(f"Ошибка создания теории для группы {group_letter}: {str(e)}")
+                # Continue with other groups even if one fails
+                continue
+        
+        if not created_theories:
+            raise HTTPException(status_code=500, detail="Не удалось создать ни одной теории")
+        
+        execution_time = time.time() - start_time
+        
+        return {
+            "success": True,
+            "message": f"Успешно создано {len(created_theories)} теорий через стратификацию",
+            "stratification": stratification_result,
+            "theories": created_theories,
+            "execution_time": f"{execution_time:.3f}s",
+            "total_users": sum(theory["users_added"] for theory in created_theories)
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Ошибка стратификации: {str(e)}")
 
 # Remaining endpoints with authentication protection...
 @app.get("/query/history", response_model=List[QueryHistoryResponse])
