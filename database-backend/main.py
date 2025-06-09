@@ -59,7 +59,41 @@ security = HTTPBearer()
 query_builder = QueryBuilder()
 
 # In-memory storage for demo purposes
-query_history = []
+query_history = [
+    {
+        "id": 1,
+        "sql": "SELECT * FROM employees WHERE department = 'IT'",
+        "database_id": "CORPORATE",
+        "table": "employees",
+        "execution_time": "0.245s",
+        "status": "success",
+        "created_at": datetime.now() - timedelta(minutes=5),
+        "row_count": 45,
+        "user": "admin"
+    },
+    {
+        "id": 2,
+        "sql": "SELECT COUNT(*) FROM sales WHERE sale_date >= '2024-01-01'",
+        "database_id": "ANALYTICS",
+        "table": "sales",
+        "execution_time": "0.156s",
+        "status": "success",
+        "created_at": datetime.now() - timedelta(minutes=15),
+        "row_count": 1,
+        "user": "analyst"
+    },
+    {
+        "id": 3,
+        "sql": "SELECT * FROM users WHERE status = 'active'",
+        "database_id": "CORPORATE",
+        "table": "users",
+        "execution_time": "0.089s",
+        "status": "success",
+        "created_at": datetime.now() - timedelta(hours=1),
+        "row_count": 156,
+        "user": "manager"
+    }
+]
 saved_queries = []
 app_settings = {
     "database": {
@@ -205,8 +239,11 @@ async def execute_database_query(request: QueryRequest, current_user: dict = Dep
         
         if result["success"]:
             # Add to query history with user info
+            # Get next ID (max existing ID + 1)
+            next_id = max([q.get("id", 0) for q in query_history], default=0) + 1
+            
             query_history.append({
-                "id": len(query_history) + 1,
+                "id": next_id,
                 "sql": sql_query,
                 "database_id": request.database_id,
                 "table": request.table,
@@ -227,8 +264,11 @@ async def execute_database_query(request: QueryRequest, current_user: dict = Dep
             )
         else:
             # Add failed query to history
+            # Get next ID (max existing ID + 1)
+            next_id = max([q.get("id", 0) for q in query_history], default=0) + 1
+            
             query_history.append({
-                "id": len(query_history) + 1,
+                "id": next_id,
                 "sql": sql_query,
                 "database_id": request.database_id,
                 "table": request.table,
@@ -586,11 +626,46 @@ async def update_settings(settings: SettingsResponse, current_user: dict = Depen
 @app.get("/stats", response_model=StatsResponse)
 async def get_dashboard_stats(current_user: dict = Depends(get_current_user_dependency)):
     """Получить статистику для панели управления"""
+    # Calculate real statistics
+    total_queries = len(query_history)
+    
+    # Get unique users count from query history
+    unique_users = set()
+    total_execution_time = 0
+    successful_queries = 0
+    
+    for query in query_history:
+        if query.get("user"):
+            unique_users.add(query["user"])
+        
+        # Calculate average response time from successful queries
+        if query.get("status") == "success" and query.get("execution_time"):
+            try:
+                exec_time = float(query["execution_time"].replace("s", ""))
+                total_execution_time += exec_time
+                successful_queries += 1
+            except (ValueError, AttributeError):
+                pass
+    
+    # Calculate average response time
+    if successful_queries > 0:
+        avg_time = total_execution_time / successful_queries
+        avg_response_time = f"{avg_time:.2f}s"
+    else:
+        avg_response_time = "0.00s"
+    
+    # Get active databases count
+    try:
+        databases = get_databases()
+        active_databases = len(databases)
+    except:
+        active_databases = 1  # Default fallback
+    
     return StatsResponse(
-        total_queries=len(query_history),
-        active_databases=1,  # Currently only one database
-        total_users=1,  # Demo value
-        avg_response_time="0.8s"
+        total_queries=total_queries,
+        active_databases=active_databases,
+        total_users=len(unique_users),
+        avg_response_time=avg_response_time
     )
 
 if __name__ == "__main__":

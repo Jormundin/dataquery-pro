@@ -111,6 +111,10 @@ export const databaseAPI = {
   getRowCount: (queryData) => 
     api.post('/query/count', queryData),
   
+  // Get dashboard statistics
+  getStats: () => 
+    api.get('/stats'),
+  
   // Theory Management
   createTheory: (theoryData) => 
     api.post('/theories/create', theoryData),

@@ -7,7 +7,8 @@ import {
   Users, 
   Activity,
   TrendingUp,
-  Clock
+  Clock,
+  User
 } from 'lucide-react';
 import { databaseAPI, dataAPI } from '../services/api';
 
@@ -32,20 +33,23 @@ const Dashboard = () => {
     setError(null);
     
     try {
+      // Load dashboard statistics from the backend
+      const statsResponse = await databaseAPI.getStats();
+      
       // Load databases - backend returns direct array
       const dbResponse = await databaseAPI.getDatabases();
-      setDatabases(dbResponse.data || []); // Changed: removed .databases
+      setDatabases(dbResponse.data || []); 
       
       // Load query history - backend returns direct array  
       const historyResponse = await databaseAPI.getQueryHistory(1, 4);
-      setRecentQueries(historyResponse.data || []); // Changed: removed .queries
+      setRecentQueries(historyResponse.data || []); 
       
-      // Update stats based on loaded data
+      // Update stats from backend response
       setStats({
-        totalQueries: historyResponse.data ? historyResponse.data.length : 0, // Updated
-        activeDatabases: dbResponse.data ? dbResponse.data.length : 0, // Updated
-        totalUsers: 156, // This would come from user management API
-        avgResponseTime: '0.8s' // This would come from performance metrics API
+        totalQueries: statsResponse.data.total_queries || 0,
+        activeDatabases: statsResponse.data.active_databases || 0,
+        totalUsers: statsResponse.data.total_users || 0,
+        avgResponseTime: statsResponse.data.avg_response_time || '0s'
       });
       
     } catch (err) {
@@ -56,15 +60,43 @@ const Dashboard = () => {
       setStats({
         totalQueries: 1247,
         activeDatabases: 8,
-        totalUsers: 156,
+        totalUsers: 0, // Don't show hardcoded user count
         avgResponseTime: '0.8s'
       });
       
       setRecentQueries([
-        { id: 1, query: 'Анализ клиентских данных', table: 'customers', time: '2 минуты назад', status: 'success' },
-        { id: 2, query: 'Отчет по продажам за 4 квартал', table: 'sales', time: '5 минут назад', status: 'success' },
-        { id: 3, query: 'Аудит прав пользователей', table: 'users', time: '12 минут назад', status: 'pending' },
-        { id: 4, query: 'Проверка уровня запасов', table: 'inventory', time: '18 минут назад', status: 'success' },
+        { 
+          id: 1, 
+          sql: 'Анализ клиентских данных', 
+          table: 'customers', 
+          created_at: new Date(Date.now() - 2 * 60 * 1000).toISOString(),
+          status: 'success',
+          user: 'admin'
+        },
+        { 
+          id: 2, 
+          sql: 'Отчет по продажам за 4 квартал', 
+          table: 'sales', 
+          created_at: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
+          status: 'success',
+          user: 'analyst'
+        },
+        { 
+          id: 3, 
+          sql: 'Аудит прав пользователей', 
+          table: 'users', 
+          created_at: new Date(Date.now() - 12 * 60 * 1000).toISOString(),
+          status: 'pending',
+          user: 'admin'
+        },
+        { 
+          id: 4, 
+          sql: 'Проверка уровня запасов', 
+          table: 'inventory', 
+          created_at: new Date(Date.now() - 18 * 60 * 1000).toISOString(),
+          status: 'success',
+          user: 'manager'
+        },
       ]);
       
       setDatabases([
@@ -101,6 +133,24 @@ const Dashboard = () => {
         return <span className="badge badge-warning">Обслуживание</span>;
       default:
         return <span className="badge badge-secondary">{status}</span>;
+    }
+  };
+
+  const formatTimeAgo = (timestamp) => {
+    const now = new Date();
+    const queryTime = new Date(timestamp);
+    const diffInMinutes = Math.floor((now - queryTime) / (1000 * 60));
+    
+    if (diffInMinutes < 1) {
+      return 'Только что';
+    } else if (diffInMinutes < 60) {
+      return `${diffInMinutes} мин назад`;
+    } else if (diffInMinutes < 1440) {
+      const hours = Math.floor(diffInMinutes / 60);
+      return `${hours} ч назад`;
+    } else {
+      const days = Math.floor(diffInMinutes / 1440);
+      return `${days} д назад`;
     }
   };
 
@@ -153,7 +203,9 @@ const Dashboard = () => {
                 <Users className="nav-icon" />
               </div>
               <div className="stat-content">
-                <div className="stat-number">{stats.totalUsers}</div>
+                <div className="stat-number">
+                  {stats.totalUsers > 0 ? stats.totalUsers : 'Н/Д'}
+                </div>
                 <div className="stat-label">Пользователей</div>
               </div>
             </div>
@@ -169,7 +221,7 @@ const Dashboard = () => {
             </div>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '1.5rem' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
             {/* Recent Queries */}
             <div className="card">
               <div className="card-header">
@@ -181,6 +233,7 @@ const Dashboard = () => {
                     <tr>
                       <th>Запрос</th>
                       <th>Таблица</th>
+                      <th>Пользователь</th>
                       <th>Время</th>
                       <th>Статус</th>
                     </tr>
@@ -189,15 +242,26 @@ const Dashboard = () => {
                     {recentQueries.length > 0 ? (
                       recentQueries.map((query) => (
                         <tr key={query.id}>
-                          <td>{query.query}</td>
+                          <td title={query.sql}>
+                            {query.sql.length > 50 
+                              ? `${query.sql.substring(0, 50)}...` 
+                              : query.sql
+                            }
+                          </td>
                           <td><code>{query.table}</code></td>
-                          <td>{query.time}</td>
+                          <td>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                              <User size={14} />
+                              {query.user || 'N/A'}
+                            </div>
+                          </td>
+                          <td>{formatTimeAgo(query.created_at)}</td>
                           <td>{getStatusBadge(query.status)}</td>
                         </tr>
                       ))
                     ) : (
                       <tr>
-                        <td colSpan="4" style={{ textAlign: 'center', color: '#6b7280' }}>
+                        <td colSpan="5" style={{ textAlign: 'center', color: '#6b7280' }}>
                           Нет данных о запросах
                         </td>
                       </tr>

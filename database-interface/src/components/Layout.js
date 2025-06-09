@@ -8,7 +8,7 @@ import {
   User, 
   LogOut,
   Shield,
-  Flask
+  TestTube
 } from 'lucide-react';
 
 const Layout = ({ user, onLogout, children }) => {
@@ -18,7 +18,7 @@ const Layout = ({ user, onLogout, children }) => {
     { path: '/dashboard', label: 'Панель управления', icon: BarChart3 },
     { path: '/query-builder', label: 'Конструктор запросов', icon: Database },
     { path: '/data-viewer', label: 'Просмотр данных', icon: Eye },
-    { path: '/active-theories', label: 'Активные теории', icon: Flask },
+    { path: '/active-theories', label: 'Активные теории', icon: TestTube },
     { path: '/settings', label: 'Настройки', icon: Settings },
   ];
 

@@ -88,6 +88,7 @@ class QueryHistoryResponse(BaseModel):
     status: str
     created_at: datetime
     row_count: int
+    user: Optional[str] = None
 
 class SavedQueryResponse(BaseModel):
     id: int
