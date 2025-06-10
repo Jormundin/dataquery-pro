@@ -31,6 +31,10 @@ const QueryBuilder = () => {
   const [isCountLoading, setIsCountLoading] = useState(false);
   const [countError, setCountError] = useState(null);
 
+  // Pagination state for query results
+  const [resultsCurrentPage, setResultsCurrentPage] = useState(1);
+  const [resultsRowsPerPage, setResultsRowsPerPage] = useState(100);
+
   // Theory creation state
   const [showTheoryModal, setShowTheoryModal] = useState(false);
   const [theoryData, setTheoryData] = useState({
@@ -184,6 +188,7 @@ const QueryBuilder = () => {
 
     setIsLoading(true);
     setError(null);
+    setResultsCurrentPage(1); // Reset pagination on new query
     
     try {
       const queryData = {
@@ -200,40 +205,79 @@ const QueryBuilder = () => {
       
       if (response.data.success) {
         setQueryResults({
-          columns: response.data.columns || queryData.columns,
+          columns: response.data.columns || [],
           data: response.data.data || [],
           totalRows: response.data.row_count || 0,
-          executionTime: response.data.execution_time || '0.000s'
+          executionTime: response.data.execution_time || 'неизвестно'
         });
-        
-        // Check for IIN columns in results for theory creation
-        if (response.data.data && response.data.data.length > 0) {
-          await checkForIINColumns(response.data.data);
-        }
+
+        // Check for IIN columns after successful query
+        await checkForIINColumns(response.data);
       } else {
-        setError('Ошибка выполнения запроса: ' + response.data.message);
+        setError(response.data.message || 'Ошибка выполнения запроса');
       }
-      
     } catch (err) {
-      console.error('Error executing query:', err);
-      setError('Ошибка выполнения запроса: ' + (err.response?.data?.detail || err.message));
+      console.error('Query execution error:', err);
+      const errorMessage = err.response?.data?.detail || err.message || 'Ошибка выполнения запроса';
+      setError(errorMessage);
       
-      // Fallback to mock data if API fails
-      const mockResults = {
-        columns: selectedColumns.length > 0 ? selectedColumns : columns.map(col => col.name),
-        data: [
-          { id: 1, first_name: 'Иван', last_name: 'Петров', email: 'ivan@example.com', status: 'активный' },
-          { id: 2, first_name: 'Мария', last_name: 'Смирнова', email: 'maria@example.com', status: 'активный' },
-          { id: 3, first_name: 'Алексей', last_name: 'Иванов', email: 'alex@example.com', status: 'неактивный' },
-        ],
-        totalRows: 3,
-        executionTime: '0.045s'
-      };
-      
-      setQueryResults(mockResults);
+      // Mock data for development/testing
+      if (selectedTable && selectedDatabase) {
+        console.log('Using mock data for testing');
+        const mockResults = {
+          columns: columns.slice(0, 5).map(col => col.name),
+          data: Array.from({ length: 50 }, (_, i) => {
+            const row = {};
+            columns.slice(0, 5).forEach(col => {
+              switch (col.type) {
+                case 'number':
+                  row[col.name] = Math.floor(Math.random() * 1000);
+                  break;
+                case 'date':
+                  row[col.name] = new Date(Date.now() - Math.random() * 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+                  break;
+                default:
+                  row[col.name] = `Тестовые данные ${i + 1}`;
+              }
+            });
+            return row;
+          }),
+          totalRows: 50,
+          executionTime: '0.15s'
+        };
+        setQueryResults(mockResults);
+      }
     } finally {
       setIsLoading(false);
     }
+  };
+
+  // Pagination helper functions for query results
+  const getResultsPaginatedData = () => {
+    if (!queryResults || !queryResults.data) return [];
+    
+    const startIndex = (resultsCurrentPage - 1) * resultsRowsPerPage;
+    const endIndex = startIndex + resultsRowsPerPage;
+    return queryResults.data.slice(startIndex, endIndex);
+  };
+
+  const getResultsTotalPages = () => {
+    if (!queryResults || !queryResults.data) return 1;
+    return Math.ceil(queryResults.data.length / resultsRowsPerPage);
+  };
+
+  const handleResultsPageChange = (newPage) => {
+    setResultsCurrentPage(newPage);
+  };
+
+  const getResultsPaginationInfo = () => {
+    if (!queryResults || !queryResults.data) return { start: 0, end: 0, total: 0 };
+    
+    const startIndex = (resultsCurrentPage - 1) * resultsRowsPerPage + 1;
+    const endIndex = Math.min(resultsCurrentPage * resultsRowsPerPage, queryResults.data.length);
+    const total = queryResults.data.length;
+    
+    return { start: startIndex, end: endIndex, total };
   };
 
   const getRowCount = async () => {
@@ -874,7 +918,7 @@ const QueryBuilder = () => {
               Результаты стратификации
             </h2>
             <div style={{ fontSize: '0.875rem', color: '#6b7280' }}>
-              {stratificationResults.theories.length} групп создано • {stratificationResults.theories.reduce((sum, theory) => sum + (theory.users_added || 0), 0)} пользователей всего
+              Стратификация завершена успешно! {stratificationResults.theories.length} групп создано • {stratificationResults.theories.reduce((sum, theory) => sum + (theory.users_added || 0), 0)} пользователей всего
             </div>
           </div>
           
@@ -953,10 +997,78 @@ const QueryBuilder = () => {
       {queryResults && (
         <div className="card">
           <div className="card-header">
-            <h2 className="card-title">Результаты запроса</h2>
-            <div style={{ fontSize: '0.875rem', color: '#6b7280' }}>
-              {queryResults.totalRows} строк • Время выполнения: {queryResults.executionTime}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
+              <div>
+                <h2 className="card-title">Результаты запроса</h2>
+                <div style={{ fontSize: '0.875rem', color: '#6b7280', marginTop: '0.25rem' }}>
+                  {queryResults.totalRows} строк • Время выполнения: {queryResults.executionTime}
+                </div>
+              </div>
+              
+              <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                <select
+                  className="form-select"
+                  value={resultsRowsPerPage}
+                  onChange={(e) => {
+                    setResultsRowsPerPage(parseInt(e.target.value));
+                    setResultsCurrentPage(1);
+                  }}
+                  style={{ width: 'auto', fontSize: '0.875rem' }}
+                >
+                  <option value={25}>25 строк</option>
+                  <option value={50}>50 строк</option>
+                  <option value={100}>100 строк</option>
+                  <option value={200}>200 строк</option>
+                </select>
+
+                <button 
+                  className="btn btn-success"
+                  onClick={() => {
+                    // Export functionality could be added here
+                    const csvContent = [
+                      queryResults.columns.join(','),
+                      ...queryResults.data.map(row =>
+                        queryResults.columns.map(col => row[col] || '').join(',')
+                      )
+                    ].join('\n');
+
+                    const blob = new Blob([csvContent], { type: 'text/csv' });
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `query_results_${new Date().toISOString().split('T')[0]}.csv`;
+                    a.click();
+                    window.URL.revokeObjectURL(url);
+                  }}
+                  style={{ fontSize: '0.875rem' }}
+                >
+                  <Download className="nav-icon" style={{ width: '16px', height: '16px' }} />
+                  Экспорт
+                </button>
+              </div>
             </div>
+          </div>
+
+          {/* Results Statistics */}
+          <div style={{ 
+            display: 'flex', 
+            justifyContent: 'space-between', 
+            alignItems: 'center', 
+            padding: '1rem', 
+            backgroundColor: '#f9fafb', 
+            borderRadius: '6px',
+            fontSize: '0.875rem',
+            color: '#6b7280',
+            margin: '0 1rem'
+          }}>
+            <div>
+              Показано {getResultsPaginationInfo().start} до {getResultsPaginationInfo().end} из {getResultsPaginationInfo().total} записей
+            </div>
+            {getResultsTotalPages() > 1 && (
+              <div>
+                Страница {resultsCurrentPage} из {getResultsTotalPages()}
+              </div>
+            )}
           </div>
           
           <div className="table-container">
@@ -969,16 +1081,88 @@ const QueryBuilder = () => {
                 </tr>
               </thead>
               <tbody>
-                {queryResults.data.map((row, index) => (
-                  <tr key={index}>
-                    {queryResults.columns.map(column => (
-                      <td key={column}>{row[column]}</td>
-                    ))}
+                {getResultsPaginatedData().length > 0 ? (
+                  getResultsPaginatedData().map((row, index) => (
+                    <tr key={index}>
+                      {queryResults.columns.map(column => (
+                        <td key={column}>{row[column] || '—'}</td>
+                      ))}
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan={queryResults.columns.length} style={{ textAlign: 'center', padding: '2rem', color: '#6b7280' }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem' }}>
+                        <Filter size={32} style={{ opacity: 0.3 }} />
+                        <span>Нет данных для отображения</span>
+                      </div>
+                    </td>
                   </tr>
-                ))}
+                )}
               </tbody>
             </table>
           </div>
+
+          {/* Enhanced Pagination Controls */}
+          {getResultsTotalPages() > 1 && (
+            <div style={{ 
+              display: 'flex', 
+              justifyContent: 'space-between', 
+              alignItems: 'center', 
+              padding: '1rem',
+              borderTop: '1px solid #e5e7eb'
+            }}>
+              <div style={{ fontSize: '0.875rem', color: '#6b7280' }}>
+                Страница {resultsCurrentPage} из {getResultsTotalPages()}
+              </div>
+              
+              <div style={{ display: 'flex', gap: '0.5rem' }}>
+                <button
+                  className="btn btn-secondary"
+                  onClick={() => handleResultsPageChange(Math.max(resultsCurrentPage - 1, 1))}
+                  disabled={resultsCurrentPage === 1}
+                  style={{ fontSize: '0.875rem' }}
+                >
+                  Назад
+                </button>
+                
+                {/* Page numbers */}
+                {Array.from({ length: Math.min(5, getResultsTotalPages()) }, (_, i) => {
+                  let pageNum;
+                  const totalPages = getResultsTotalPages();
+                  if (totalPages <= 5) {
+                    pageNum = i + 1;
+                  } else if (resultsCurrentPage <= 3) {
+                    pageNum = i + 1;
+                  } else if (resultsCurrentPage >= totalPages - 2) {
+                    pageNum = totalPages - 4 + i;
+                  } else {
+                    pageNum = resultsCurrentPage - 2 + i;
+                  }
+                  
+                  return (
+                    <button
+                      key={pageNum}
+                      className={`btn ${resultsCurrentPage === pageNum ? 'btn-primary' : 'btn-secondary'}`}
+                      onClick={() => handleResultsPageChange(pageNum)}
+                      style={{ minWidth: '40px', fontSize: '0.875rem' }}
+                    >
+                      {pageNum}
+                    </button>
+                  );
+                })}
+                
+                <button
+                  className="btn btn-secondary"
+                  onClick={() => handleResultsPageChange(Math.min(resultsCurrentPage + 1, getResultsTotalPages()))}
+                  disabled={resultsCurrentPage === getResultsTotalPages()}
+                  style={{ fontSize: '0.875rem' }}
+                >
+                  Вперед
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
       

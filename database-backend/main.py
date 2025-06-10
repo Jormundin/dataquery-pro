@@ -607,59 +607,91 @@ async def get_data(
     database_id: str = Query(..., description="Database ID"),
     table: str = Query(..., description="Table name"),
     page: int = Query(1, ge=1),
-    limit: int = Query(25, ge=1, le=100),
+    limit: int = Query(100, ge=1, le=500), # Increased default and max limit for better performance
     search: Optional[str] = Query(None),
     sort_by: Optional[str] = Query(None),
     sort_order: str = Query("asc"),
     current_user: dict = Depends(get_current_user_dependency)
 ):
-    """Получить данные с фильтрами и пагинацией"""
+    """Получить данные с фильтрами и пагинацией - оптимизированная версия для больших датасетов"""
     try:
         from database import get_table_columns
         
-        # Build query for data
-        filters = []
+        # Build WHERE clause for search
+        where_conditions = []
+        query_params = {}
+        
         if search:
             # Get actual table columns for search
             table_columns = get_table_columns(database_id.upper(), table)
             text_columns = [col['name'] for col in table_columns 
                           if col['type'].upper() in ['VARCHAR2', 'CHAR', 'CLOB']]
             
-            # Add search across VARCHAR2/text columns only
-            for col in text_columns[:3]:  # Limit to first 3 text columns to avoid too complex query
-                filters.append({
-                    "column": col,
-                    "operator": "contains",
-                    "value": search
-                })
+            # Create search conditions for text columns (limit to first 3 to avoid overly complex queries)
+            search_conditions = []
+            for i, col in enumerate(text_columns[:3]):
+                param_name = f"search_param_{i}"
+                search_conditions.append(f"UPPER({col}) LIKE UPPER(:{param_name})")
+                query_params[param_name] = f"%{search}%"
+            
+            if search_conditions:
+                where_conditions.append(f"({' OR '.join(search_conditions)})")
         
-        request_data = {
-            "database_id": database_id.upper(),
-            "table": table,
-            "filters": filters,
-            "sort_by": sort_by,
-            "sort_order": sort_order.upper(),
-            "limit": limit * page  # Get all records up to current page
-        }
+        # Build WHERE clause
+        where_clause = ""
+        if where_conditions:
+            where_clause = f"WHERE {' AND '.join(where_conditions)}"
         
-        sql_query = query_builder.build_query(request_data)
-        result = execute_query(sql_query)
+        # Build ORDER BY clause
+        order_clause = ""
+        if sort_by:
+            sort_direction = "DESC" if sort_order.upper() == "DESC" else "ASC"
+            order_clause = f"ORDER BY {sort_by} {sort_direction}"
         
-        if result["success"]:
-            total_count = len(result["data"])
-            start_idx = (page - 1) * limit
-            end_idx = start_idx + limit
-            paginated_data = result["data"][start_idx:end_idx]
+        # Step 1: Get total count efficiently
+        count_query = f"SELECT COUNT(*) as total_count FROM {table.upper()} {where_clause}"
+        count_result = execute_query(count_query, query_params)
+        
+        total_count = 0
+        if count_result["success"] and count_result["data"]:
+            total_count = count_result["data"][0].get("total_count", 0)
+        
+        # Step 2: Get paginated data using Oracle ROWNUM pagination
+        offset = (page - 1) * limit
+        
+        # Oracle pagination query using ROWNUM
+        paginated_query = f"""
+        SELECT * FROM (
+            SELECT a.*, ROWNUM rnum FROM (
+                SELECT * FROM {table.upper()} 
+                {where_clause}
+                {order_clause}
+            ) a 
+            WHERE ROWNUM <= {offset + limit}
+        ) 
+        WHERE rnum > {offset}
+        """
+        
+        data_result = execute_query(paginated_query, query_params)
+        
+        if data_result["success"]:
+            # Remove the 'rnum' column from results
+            cleaned_data = []
+            for row in data_result["data"]:
+                cleaned_row = {k: v for k, v in row.items() if k.lower() != 'rnum'}
+                cleaned_data.append(cleaned_row)
+            
+            total_pages = math.ceil(total_count / limit) if total_count > 0 else 1
             
             return DataResponse(
-                data=paginated_data,
+                data=cleaned_data,
                 total_count=total_count,
                 page=page,
                 limit=limit,
-                total_pages=math.ceil(total_count / limit)
+                total_pages=total_pages
             )
         else:
-            raise HTTPException(status_code=500, detail=result["message"])
+            raise HTTPException(status_code=500, detail=data_result["message"])
             
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Ошибка получения данных: {str(e)}")

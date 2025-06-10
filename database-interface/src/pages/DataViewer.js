@@ -14,12 +14,13 @@ const DataViewer = () => {
   const [searchInput, setSearchInput] = useState(''); // Input value for search box
   const [searchTerm, setSearchTerm] = useState(''); // Actual search term used for API calls
   const [currentPage, setCurrentPage] = useState(1);
-  const [rowsPerPage, setRowsPerPage] = useState(25);
+  const [rowsPerPage, setRowsPerPage] = useState(100); // Increased from 25 to 100 for better performance
   const [sortColumn, setSortColumn] = useState('');
   const [sortDirection, setSortDirection] = useState('asc');
   const [selectedRows, setSelectedRows] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [data, setData] = useState([]);
+  const [totalRows, setTotalRows] = useState(0); // Track total rows from server
   const [error, setError] = useState(null);
   const [selectedTable, setSelectedTable] = useState('');
   const [tables, setTables] = useState([]);
@@ -99,7 +100,10 @@ const DataViewer = () => {
 
       const response = await dataAPI.getData(params);
       const responseData = response.data.data || [];
+      const totalCount = response.data.total || responseData.length;
+      
       setData(responseData);
+      setTotalRows(totalCount);
 
       // If no columns are defined but we have data, create columns from the first row
       if (columns.length === 0 && responseData.length > 0) {
@@ -118,40 +122,16 @@ const DataViewer = () => {
       
       // Set empty data when API fails - no dummy data
       setData([]);
+      setTotalRows(0);
     } finally {
       setIsLoading(false);
     }
   };
 
-  // Filter data based on search term
-  const filteredData = data.filter(row =>
-    Object.values(row).some(value =>
-      value.toString().toLowerCase().includes(searchTerm.toLowerCase())
-    )
-  );
-
-  // Sort data
-  const sortedData = [...filteredData].sort((a, b) => {
-    if (!sortColumn) return 0;
-    
-    let aVal = a[sortColumn];
-    let bVal = b[sortColumn];
-    
-    // Handle different data types
-    if (typeof aVal === 'string') {
-      aVal = aVal.toLowerCase();
-      bVal = bVal.toLowerCase();
-    }
-    
-    if (aVal < bVal) return sortDirection === 'asc' ? -1 : 1;
-    if (aVal > bVal) return sortDirection === 'asc' ? 1 : -1;
-    return 0;
-  });
-
-  // Paginate data
-  const totalPages = Math.ceil(sortedData.length / rowsPerPage);
-  const startIndex = (currentPage - 1) * rowsPerPage;
-  const paginatedData = sortedData.slice(startIndex, startIndex + rowsPerPage);
+  // Calculate pagination info based on server data
+  const totalPages = Math.ceil(totalRows / rowsPerPage);
+  const startIndex = (currentPage - 1) * rowsPerPage + 1;
+  const endIndex = Math.min(currentPage * rowsPerPage, totalRows);
 
   const handleSort = (column) => {
     if (sortColumn === column) {
@@ -160,6 +140,7 @@ const DataViewer = () => {
       setSortColumn(column);
       setSortDirection('asc');
     }
+    setCurrentPage(1); // Reset to first page when sorting changes
   };
 
   const handleRowSelect = (id) => {
@@ -171,10 +152,11 @@ const DataViewer = () => {
   };
 
   const handleSelectAll = () => {
-    if (selectedRows.length === paginatedData.length) {
+    if (selectedRows.length === data.length) {
       setSelectedRows([]);
     } else {
-      setSelectedRows(paginatedData.map(row => row.id));
+      const allRowIds = data.map((row, index) => row.id || `row_${currentPage}_${index}`);
+      setSelectedRows(allRowIds);
     }
   };
 
@@ -196,6 +178,11 @@ const DataViewer = () => {
     if (e.key === 'Enter') {
       handleSearch();
     }
+  };
+
+  // Handle page change
+  const handlePageChange = (newPage) => {
+    setCurrentPage(newPage);
   };
 
   const formatCellValue = (value, type) => {
@@ -264,7 +251,7 @@ const DataViewer = () => {
       // Fallback to client-side export
       const csvContent = [
         columns.map(col => col.label).join(','),
-        ...sortedData.map(row =>
+        ...data.map(row =>
           columns.map(col => row[col.key]).join(',')
         )
       ].join('\n');
@@ -432,7 +419,7 @@ const DataViewer = () => {
               color: '#6b7280'
             }}>
               <div>
-                Показано {startIndex + 1} до {Math.min(startIndex + rowsPerPage, sortedData.length)} из {sortedData.length} записей
+                Показано {startIndex} до {endIndex} из {totalRows} записей
                 {searchTerm && ` (поиск: "${searchTerm}")`}
               </div>
               {selectedRows.length > 0 && (
@@ -452,7 +439,7 @@ const DataViewer = () => {
                   <th style={{ width: '50px' }}>
                     <input
                       type="checkbox"
-                      checked={selectedRows.length === paginatedData.length && paginatedData.length > 0}
+                      checked={selectedRows.length === data.length && data.length > 0}
                       onChange={handleSelectAll}
                     />
                   </th>
@@ -476,31 +463,34 @@ const DataViewer = () => {
                 </tr>
               </thead>
               <tbody>
-                {paginatedData.length > 0 ? (
-                  paginatedData.map((row) => (
-                    <tr key={row.id}>
-                      <td>
-                        <input
-                          type="checkbox"
-                          checked={selectedRows.includes(row.id)}
-                          onChange={() => handleRowSelect(row.id)}
-                        />
-                      </td>
-                      {columns.map((column) => (
-                        <td key={column.key}>
-                          {formatCellValue(row[column.key], column.type)}
+                {data.length > 0 ? (
+                  data.map((row, index) => {
+                    const rowId = row.id || `row_${currentPage}_${index}`;
+                    return (
+                      <tr key={rowId}>
+                        <td>
+                          <input
+                            type="checkbox"
+                            checked={selectedRows.includes(rowId)}
+                            onChange={() => handleRowSelect(rowId)}
+                          />
                         </td>
-                      ))}
-                      <td>
-                        <button
-                          className="btn btn-secondary"
-                          style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}
-                        >
-                          <Eye style={{ width: '14px', height: '14px' }} />
-                        </button>
-                      </td>
-                    </tr>
-                  ))
+                        {columns.map((column) => (
+                          <td key={column.key}>
+                            {formatCellValue(row[column.key], column.type)}
+                          </td>
+                        ))}
+                        <td>
+                          <button
+                            className="btn btn-secondary"
+                            style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}
+                          >
+                            <Eye style={{ width: '14px', height: '14px' }} />
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })
                 ) : (
                   <tr>
                     <td colSpan={columns.length + 2} style={{ textAlign: 'center', padding: '3rem', color: '#6b7280' }}>
@@ -556,7 +546,7 @@ const DataViewer = () => {
                 <div style={{ display: 'flex', gap: '0.5rem' }}>
                   <button
                     className="btn btn-secondary"
-                    onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                    onClick={() => handlePageChange(Math.max(currentPage - 1, 1))}
                     disabled={currentPage === 1}
                   >
                     <ChevronLeft style={{ width: '16px', height: '16px' }} />
@@ -580,7 +570,7 @@ const DataViewer = () => {
                       <button
                         key={pageNum}
                         className={`btn ${currentPage === pageNum ? 'btn-primary' : 'btn-secondary'}`}
-                        onClick={() => setCurrentPage(pageNum)}
+                        onClick={() => handlePageChange(pageNum)}
                         style={{ minWidth: '40px' }}
                       >
                         {pageNum}
@@ -590,7 +580,7 @@ const DataViewer = () => {
                   
                   <button
                     className="btn btn-secondary"
-                    onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                    onClick={() => handlePageChange(Math.min(currentPage + 1, totalPages))}
                     disabled={currentPage === totalPages}
                   >
                     Вперед

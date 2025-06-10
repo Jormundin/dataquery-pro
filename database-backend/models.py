@@ -161,7 +161,7 @@ class CreateTheoryRequest(BaseModel):
     user_iins: List[str]    # List of IIN values from query results
 
 class TheoryResponse(BaseModel):
-    theory_id: int
+    theory_id: str  # Changed from int to str to support decimal IDs like "1.1"
     theory_name: str
     theory_description: str
     load_date: str
@@ -174,5 +174,5 @@ class TheoryResponse(BaseModel):
 class TheoryCreateResponse(BaseModel):
     success: bool
     message: str
-    theory_id: Optional[int] = None
+    theory_id: Optional[str] = None  # Changed from int to str to support decimal IDs
     users_added: Optional[int] = None 
