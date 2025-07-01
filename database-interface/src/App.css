@@ -442,6 +442,69 @@ body {
   pointer-events: none;
 }
 
+/* Tabs */
+.tabs-container {
+  margin-bottom: 1.5rem;
+}
+
+.tabs-header {
+  display: flex;
+  gap: 0.5rem;
+  border-bottom: 2px solid #e5e7eb;
+  padding-bottom: 0;
+}
+
+.tab-btn {
+  padding: 0.75rem 1.5rem;
+  background: none;
+  border: none;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #6b7280;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  border-radius: 6px 6px 0 0;
+}
+
+.tab-btn:hover {
+  color: #374151;
+  background-color: #f9fafb;
+}
+
+.tab-btn.active {
+  color: #3b82f6;
+  border-bottom-color: #3b82f6;
+  background-color: white;
+}
+
+/* Historical badge */
+.historical-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.25rem 0.5rem;
+  background-color: #f3f4f6;
+  color: #6b7280;
+  font-size: 0.75rem;
+  font-weight: 500;
+  border-radius: 4px;
+  margin-left: 0.5rem;
+}
+
+.theory-card.historical {
+  opacity: 0.85;
+  border: 1px solid #e5e7eb;
+}
+
+.theory-card.historical:hover {
+  opacity: 1;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
 /* Tooltips */
 .tooltip {
   position: relative;

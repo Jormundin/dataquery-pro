@@ -351,9 +351,33 @@ async def detect_iins_in_results(data: Dict[str, Any], current_user: dict = Depe
     try:
         from database import detect_iin_columns, extract_iin_values
         
-        query_results = data.get("results", [])
+        # Handle different possible data structures from frontend
+        results_data = data.get("results", {})
         
-        if not query_results:
+        # Debug logging to help identify issues
+        print(f"DEBUG: Received data keys: {list(data.keys())}")
+        print(f"DEBUG: Results data type: {type(results_data)}")
+        if isinstance(results_data, dict):
+            print(f"DEBUG: Results data keys: {list(results_data.keys())}")
+        
+        # If results is the direct query response structure, extract the data array
+        if isinstance(results_data, dict) and "data" in results_data:
+            query_results = results_data.get("data", [])
+            print(f"DEBUG: Using results.data, found {len(query_results)} rows")
+        # If results is already the data array
+        elif isinstance(results_data, list):
+            query_results = results_data
+            print(f"DEBUG: Using results as data array, found {len(query_results)} rows")
+        # If results is directly passed in the top level
+        elif "data" in data:
+            query_results = data.get("data", [])
+            print(f"DEBUG: Using data.data, found {len(query_results)} rows")
+        else:
+            query_results = []
+            print("DEBUG: No valid data structure found, using empty array")
+        
+        if not query_results or len(query_results) == 0:
+            print("DEBUG: No query results to analyze")
             return {
                 "has_iin_column": False,
                 "iin_column": None,
@@ -361,10 +385,17 @@ async def detect_iins_in_results(data: Dict[str, Any], current_user: dict = Depe
                 "user_count": 0
             }
         
+        # Check first row structure for debugging
+        if query_results and len(query_results) > 0:
+            first_row = query_results[0]
+            print(f"DEBUG: First row keys: {list(first_row.keys()) if isinstance(first_row, dict) else 'Not a dict'}")
+        
         iin_column = detect_iin_columns(query_results)
+        print(f"DEBUG: Detected IIN column: {iin_column}")
         
         if iin_column:
             iin_values = extract_iin_values(query_results, iin_column)
+            print(f"DEBUG: Extracted {len(iin_values)} unique IIN values")
             return {
                 "has_iin_column": True,
                 "iin_column": iin_column,
@@ -372,6 +403,7 @@ async def detect_iins_in_results(data: Dict[str, Any], current_user: dict = Depe
                 "user_count": len(iin_values)
             }
         else:
+            print("DEBUG: No IIN column detected")
             return {
                 "has_iin_column": False,
                 "iin_column": None,
@@ -380,6 +412,9 @@ async def detect_iins_in_results(data: Dict[str, Any], current_user: dict = Depe
             }
             
     except Exception as e:
+        print(f"ERROR in detect_iins_in_results: {str(e)}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Ошибка анализа результатов: {str(e)}")
 
 @app.post("/theories/stratify-and-create")
@@ -471,16 +506,26 @@ async def stratify_and_create_theories(data: Dict[str, Any], current_user: dict 
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Ошибка стратификации: {str(e)}")
         
-        # Create theories for each stratified group
+        # Validate number of groups (minimum 3, maximum 5)
+        num_groups = stratification_config.get("numGroups", 2)
+        if num_groups < 3:
+            raise HTTPException(status_code=400, detail="Минимальное количество групп для стратификации: 3")
+        if num_groups > 5:
+            raise HTTPException(status_code=400, detail="Максимальное количество групп для стратификации: 5")
+
+        # Create theories for each stratified group AND insert into SC local tables
         try:
-            from database import create_theory_with_custom_id, get_next_theory_id
+            from database import (create_theory_with_custom_id, get_next_sc_campaign_id, 
+                                insert_control_group, insert_target_groups)
         except ImportError as e:
             raise HTTPException(status_code=500, detail=f"Ошибка импорта функций создания теории: {str(e)}")
         
-        # Get base theory ID for this stratification
-        base_theory_id = get_next_theory_id()
+        # Get base campaign ID for this stratification (SC00000001, SC00000002, etc.)
+        base_campaign_id = get_next_sc_campaign_id()
         
         created_theories = []
+        control_group_inserted = False
+        target_groups_iins = []  # Collect all target group IINs
         
         for i, group in enumerate(stratification_result.get("stratified_groups", [])):
             group_letter = chr(65 + i)  # A, B, C, D, E
@@ -495,14 +540,23 @@ async def stratify_and_create_theories(data: Dict[str, Any], current_user: dict 
                         iin_values.append(str(row[iin_column]))
             
             # Create theory data
-            theory_name = f"{stratification_config.get('theoryBaseName', 'Стратифицированная теория')} - Группа {group_letter}"
-            theory_description = f"{stratification_config.get('theoryDescription', 'Теория создана через стратификацию данных')} (Группа {group_letter} - {group.get('num_rows', 0)} записей, пропорция: {group.get('proportion', 0):.3f})"
+            theory_name = f"{stratification_config.get('theoryBaseName', 'Стратифицированная кампания')} - Группа {group_letter}"
+            theory_description = f"{stratification_config.get('theoryDescription', 'Кампания создана через стратификацию данных')} (Группа {group_letter} - {group.get('num_rows', 0)} записей, пропорция: {group.get('proportion', 0):.3f})"
             theory_start_date = stratification_config.get("theoryStartDate")
             theory_end_date = stratification_config.get("theoryEndDate")
             created_by = current_user["username"]
             
-            # Create sub-ID for this group (e.g., 1.1, 1.2, 1.3)
-            sub_theory_id = f"{base_theory_id}.{i + 1}"
+            # Create sub-ID for this group (e.g., SC00000001.1, SC00000001.2, SC00000001.3)
+            sub_theory_id = f"{base_campaign_id}.{i + 1}"
+            
+            # Prepare additional fields for SC local tables
+            additional_fields = {
+                'tab1': theory_description,
+                'tab2': stratification_config.get('additionalField1', None),
+                'tab3': stratification_config.get('additionalField2', None),
+                'tab4': stratification_config.get('additionalField3', None),
+                'tab5': stratification_config.get('additionalField4', None)
+            }
             
             # Insert theory using custom ID function
             try:
@@ -517,11 +571,28 @@ async def stratify_and_create_theories(data: Dict[str, Any], current_user: dict 
                 )
                 
                 if theory_result.get("success"):
+                    # First group (Group A) goes to control, rest go to target
+                    if i == 0 and not control_group_inserted:
+                        # Insert into SC_local_control (first group only)
+                        control_result = insert_control_group(
+                            sub_theory_id,
+                            iin_values,
+                            theory_start_date,
+                            theory_end_date,
+                            additional_fields
+                        )
+                        control_group_inserted = True
+                        print(f"Control group result: {control_result}")
+                    else:
+                        # Collect IINs for target groups (Groups B, C, D, E)
+                        target_groups_iins.extend(iin_values)
+                    
                     created_theories.append({
                         "theory_id": theory_result.get("theory_id"),
                         "theory_name": theory_name,
                         "users_added": theory_result.get("users_added", 0),
                         "group": group_letter,
+                        "group_type": "control" if i == 0 else "target",
                         "proportion": group.get("proportion", 0),
                         "num_rows": group.get("num_rows", 0),
                         "sub_id": sub_theory_id
@@ -530,8 +601,25 @@ async def stratify_and_create_theories(data: Dict[str, Any], current_user: dict 
                     continue
                     
             except Exception as e:
+                print(f"Error creating theory for group {group_letter}: {e}")
                 # Continue with other groups even if one fails
                 continue
+        
+        # Insert all target groups into SC_local_target
+        if target_groups_iins:
+            try:
+                # Use the base campaign ID for target groups (they all belong to same campaign)
+                target_result = insert_target_groups(
+                    base_campaign_id,  # Use base campaign ID, not sub-ID
+                    target_groups_iins,
+                    theory_start_date,
+                    theory_end_date,
+                    additional_fields
+                )
+                print(f"Target groups result: {target_result}")
+            except Exception as e:
+                print(f"Error inserting target groups: {e}")
+                # Don't fail the entire operation for this
         
         if not created_theories:
             raise HTTPException(status_code=500, detail="Не удалось создать ни одной теории")
@@ -540,12 +628,12 @@ async def stratify_and_create_theories(data: Dict[str, Any], current_user: dict 
         
         return {
             "success": True,
-            "message": f"Успешно создано {len(created_theories)} теорий через стратификацию с базовым ID {base_theory_id}",
+            "message": f"Успешно создано {len(created_theories)} теорий через стратификацию с базовым Campaign ID {base_campaign_id}",
             "stratification": stratification_result,
             "theories": created_theories,
             "execution_time": f"{execution_time:.3f}s",
             "total_users": sum(theory["users_added"] for theory in created_theories),
-            "base_theory_id": base_theory_id
+            "base_campaign_id": base_campaign_id
         }
         
     except HTTPException as he:
@@ -835,6 +923,90 @@ async def get_dashboard_stats(current_user: dict = Depends(get_current_user_depe
         total_users=len(unique_users),
         avg_response_time=avg_response_time
     )
+
+# SC Local Tables Data Endpoints
+@app.get("/sc-local/control")
+async def get_control_group_data(
+    theory_id: Optional[str] = Query(None, description="Filter by theory ID"),
+    current_user: dict = Depends(get_current_user_dependency)
+):
+    """Получить данные контрольной группы из SC_local_control"""
+    try:
+        from database import get_sc_local_data
+        
+        result = get_sc_local_data("SC_local_control", theory_id)
+        
+        if result["success"]:
+            return {
+                "success": True,
+                "data": result["data"],
+                "total_count": len(result["data"]),
+                "message": result["message"]
+            }
+        else:
+            raise HTTPException(status_code=500, detail=result["message"])
+            
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Ошибка получения данных контрольной группы: {str(e)}")
+
+@app.get("/sc-local/target")
+async def get_target_groups_data(
+    theory_id: Optional[str] = Query(None, description="Filter by theory ID"),
+    current_user: dict = Depends(get_current_user_dependency)
+):
+    """Получить данные целевых групп из SC_local_target"""
+    try:
+        from database import get_sc_local_data
+        
+        result = get_sc_local_data("SC_local_target", theory_id)
+        
+        if result["success"]:
+            return {
+                "success": True,
+                "data": result["data"],
+                "total_count": len(result["data"]),
+                "message": result["message"]
+            }
+        else:
+            raise HTTPException(status_code=500, detail=result["message"])
+            
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Ошибка получения данных целевых групп: {str(e)}")
+
+@app.get("/sc-local/summary/{theory_id}")
+async def get_campaign_summary(
+    theory_id: str,
+    current_user: dict = Depends(get_current_user_dependency)
+):
+    """Получить сводку по кампании (контроль + целевые группы)"""
+    try:
+        from database import get_sc_local_data
+        
+        # Get control group data
+        control_result = get_sc_local_data("SC_local_control", theory_id)
+        # Get target groups data  
+        target_result = get_sc_local_data("SC_local_target", theory_id)
+        
+        control_count = len(control_result["data"]) if control_result["success"] else 0
+        target_count = len(target_result["data"]) if target_result["success"] else 0
+        
+        return {
+            "success": True,
+            "theory_id": theory_id,
+            "control_group": {
+                "count": control_count,
+                "data": control_result["data"] if control_result["success"] else []
+            },
+            "target_groups": {
+                "count": target_count,
+                "data": target_result["data"] if target_result["success"] else []
+            },
+            "total_users": control_count + target_count,
+            "message": f"Сводка по кампании {theory_id}: {control_count} контроль + {target_count} целевых = {control_count + target_count} всего"
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Ошибка получения сводки кампании: {str(e)}")
 
 @app.get("/test/stratification-deps")
 async def test_stratification_dependencies():

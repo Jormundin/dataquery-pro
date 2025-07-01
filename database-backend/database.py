@@ -27,18 +27,48 @@ ALLOWED_TABLES = {
                 {'name': 'CITY_RESIDENCE', 'type': 'VARCHAR2', 'description': 'NAME'},
                 {'name': 'AGE', 'type': 'DATE', 'description': 'DATE'},
             ]
-        },
+    },
         'DSSB_APP.SoftCollection_theories': {
-            'description': 'Информация о теориях Soft Collection',
+            'description': 'Реестр кампаний Soft Collection (одна запись на кампанию)',
             'columns': [
-                {'name': 'IIN', 'type': 'VARCHAR2', 'description': 'ID'},
-                {'name': 'THEORY_NAME', 'type': 'VARCHAR2', 'description': 'ID'},
-                {'name': 'THEORY_DESCRIPTION', 'type': 'VARCHAR2', 'description': 'ID'},
-                {'name': 'LOAD_DATE', 'type': 'DATE', 'description': 'ID'},
-                {'name': 'THEORY_START_DATE', 'type': 'DATE', 'description': 'ID'},
-                {'name': 'THEORY_END_DATE', 'type': 'DATE', 'description': 'NAME'},
-                {'name': 'THEORY_ID', 'type': 'VARCHAR2', 'description': 'NAME'},
-                {'name': 'CREATED_BY', 'type': 'VARCHAR2', 'description': 'NAME'},
+                {'name': 'THEORY_ID', 'type': 'VARCHAR2', 'description': 'Уникальный ID кампании'},
+                {'name': 'THEORY_NAME', 'type': 'VARCHAR2', 'description': 'Название кампании'},
+                {'name': 'THEORY_DESCRIPTION', 'type': 'VARCHAR2', 'description': 'Описание кампании'},
+                {'name': 'LOAD_DATE', 'type': 'DATE', 'description': 'Дата создания записи'},
+                {'name': 'THEORY_START_DATE', 'type': 'DATE', 'description': 'Дата начала кампании'},
+                {'name': 'THEORY_END_DATE', 'type': 'DATE', 'description': 'Дата окончания кампании'},
+                {'name': 'USER_COUNT', 'type': 'NUMBER', 'description': 'Количество пользователей в кампании'},
+                {'name': 'CREATED_BY', 'type': 'VARCHAR2', 'description': 'Кто создал кампанию'},
+            ]
+        },
+        'DSSB_APP.SC_local_control': {
+            'description': 'Контрольная группа пользователей из стратификации',
+            'columns': [
+                {'name': 'IIN', 'type': 'VARCHAR2', 'description': 'Индивидуальный идентификационный номер'},
+                {'name': 'THEORY_ID', 'type': 'VARCHAR2', 'description': 'ID кампании'},
+                {'name': 'DATE_START', 'type': 'DATE', 'description': 'Дата начала кампании'},
+                {'name': 'DATE_END', 'type': 'DATE', 'description': 'Дата окончания кампании'},
+                {'name': 'INSERT_DATETIME', 'type': 'DATE', 'description': 'Время вставки записи'},
+                {'name': 'TAB1', 'type': 'VARCHAR2', 'description': 'Дополнительное поле 1'},
+                {'name': 'TAB2', 'type': 'VARCHAR2', 'description': 'Дополнительное поле 2'},
+                {'name': 'TAB3', 'type': 'VARCHAR2', 'description': 'Дополнительное поле 3'},
+                {'name': 'TAB4', 'type': 'VARCHAR2', 'description': 'Дополнительное поле 4'},
+                {'name': 'TAB5', 'type': 'VARCHAR2', 'description': 'Дополнительное поле 5'},
+            ]
+        },
+        'DSSB_APP.SC_local_target': {
+            'description': 'Целевые группы пользователей из стратификации',
+            'columns': [
+                {'name': 'IIN', 'type': 'VARCHAR2', 'description': 'Индивидуальный идентификационный номер'},
+                {'name': 'THEORY_ID', 'type': 'VARCHAR2', 'description': 'ID кампании'},
+                {'name': 'DATE_START', 'type': 'DATE', 'description': 'Дата начала кампании'},
+                {'name': 'DATE_END', 'type': 'DATE', 'description': 'Дата окончания кампании'},
+                {'name': 'INSERT_DATETIME', 'type': 'DATE', 'description': 'Время вставки записи'},
+                {'name': 'TAB1', 'type': 'VARCHAR2', 'description': 'Дополнительное поле 1'},
+                {'name': 'TAB2', 'type': 'VARCHAR2', 'description': 'Дополнительное поле 2'},
+                {'name': 'TAB3', 'type': 'VARCHAR2', 'description': 'Дополнительное поле 3'},
+                {'name': 'TAB4', 'type': 'VARCHAR2', 'description': 'Дополнительное поле 4'},
+                {'name': 'TAB5', 'type': 'VARCHAR2', 'description': 'Дополнительное поле 5'},
             ]
         }
     }
@@ -179,21 +209,57 @@ def execute_query(sql: str, params: Dict = None) -> Dict:
         }
 
 # Theory Management Functions
+def get_next_sc_campaign_id():
+    """Get next available SC campaign ID in format SC00000001, SC00000002, etc."""
+    try:
+        connection = get_connection_DSSB_APP()
+        cursor = connection.cursor()
+        
+        # Find the highest SC campaign number
+        cursor.execute("""
+        SELECT NVL(MAX(
+            CASE 
+                WHEN REGEXP_LIKE(theory_id, '^SC[0-9]{8}\.[0-9]+$') THEN 
+                    TO_NUMBER(SUBSTR(theory_id, 3, 8))
+                ELSE 0
+            END
+        ), 0) + 1 as next_campaign_id
+        FROM SoftCollection_theories
+        """)
+        result = cursor.fetchone()
+        next_campaign_num = result[0] if result else 1
+        
+        cursor.close()
+        connection.close()
+        
+        # Format as SC00000001, SC00000002, etc.
+        return f"SC{next_campaign_num:08d}"
+        
+    except Exception as e:
+        print(f"Error getting next SC campaign ID: {e}")
+        # Return a safe default
+        return "SC00000001"
+
 def get_next_theory_id():
-    """Get next available theory ID for stratification base ID"""
+    """Get next available theory ID for backward compatibility (numeric format)"""
     try:
         connection = get_connection_DSSB_APP()
         cursor = connection.cursor()
         
         # Since theory_id is now VARCHAR2, we need to find the highest numeric base ID
         # This handles both old numeric IDs (1, 2, 3) and new decimal IDs (4.1, 4.2, 4.3)
+        # but excludes SC format IDs
         cursor.execute("""
         SELECT NVL(MAX(
             CASE 
-                WHEN INSTR(theory_id, '.') > 0 THEN 
-                    TO_NUMBER(SUBSTR(theory_id, 1, INSTR(theory_id, '.') - 1))
-                ELSE 
-                    TO_NUMBER(theory_id)
+                WHEN REGEXP_LIKE(theory_id, '^[0-9]+(\.[0-9]+)?$') THEN
+                    CASE 
+                        WHEN INSTR(theory_id, '.') > 0 THEN 
+                            TO_NUMBER(SUBSTR(theory_id, 1, INSTR(theory_id, '.') - 1))
+                        ELSE 
+                            TO_NUMBER(theory_id)
+                    END
+                ELSE 0
             END
         ), 0) + 1 
         FROM SoftCollection_theories
@@ -213,34 +279,34 @@ def get_next_theory_id():
         return 1
 
 def create_theory_with_custom_id(theory_name, theory_description, theory_start_date, theory_end_date, user_iins, created_by, custom_theory_id):
-    """Create a new theory with a custom theory ID (for stratification sub-IDs)"""
+    """Create a new campaign record with a custom theory ID (for stratification sub-IDs)"""
     try:
         connection = get_connection_DSSB_APP()
         cursor = connection.cursor()
         
-        # Insert theory records for each user with custom ID
+        # Count unique users (remove duplicates and empty values)
+        unique_users = set()
+        for iin in user_iins:
+            if iin and str(iin).strip():
+                unique_users.add(str(iin).strip())
+        user_count = len(unique_users)
+        
+        # Insert single campaign record
         insert_sql = """
         INSERT INTO SoftCollection_theories 
-        (IIN, theory_name, theory_description, load_date, theory_start_date, theory_end_date, theory_id, created_by)
+        (theory_id, theory_name, theory_description, load_date, theory_start_date, theory_end_date, user_count, created_by)
         VALUES (:1, :2, :3, SYSDATE, TO_DATE(:4, 'YYYY-MM-DD'), TO_DATE(:5, 'YYYY-MM-DD'), :6, :7)
         """
         
-        users_added = 0
-        for iin in user_iins:
-            try:
-                cursor.execute(insert_sql, (
-                    iin, 
-                    theory_name, 
-                    theory_description,
-                    theory_start_date,
-                    theory_end_date,
-                    custom_theory_id,
-                    created_by
-                ))
-                users_added += 1
-            except Exception as e:
-                print(f"Error inserting IIN {iin}: {e}")
-                continue
+        cursor.execute(insert_sql, (
+            custom_theory_id,
+            theory_name, 
+            theory_description,
+            theory_start_date,
+            theory_end_date,
+            user_count,
+            created_by
+        ))
         
         connection.commit()
         cursor.close()
@@ -248,20 +314,20 @@ def create_theory_with_custom_id(theory_name, theory_description, theory_start_d
         
         return {
             "success": True,
-            "message": f"Theory '{theory_name}' created successfully with ID {custom_theory_id}",
+            "message": f"Campaign '{theory_name}' created successfully with ID {custom_theory_id}",
             "theory_id": custom_theory_id,
-            "users_added": users_added
+            "users_added": user_count
         }
         
     except Exception as e:
-        print(f"Error creating theory with custom ID: {e}")
+        print(f"Error creating campaign with custom ID: {e}")
         return {
             "success": False,
-            "message": f"Failed to create theory: {str(e)}"
+            "message": f"Failed to create campaign: {str(e)}"
         }
 
 def create_theory(theory_name, theory_description, theory_start_date, theory_end_date, user_iins, created_by):
-    """Create a new theory with user assignments"""
+    """Create a new campaign with user assignments (backward compatibility - uses numeric ID)"""
     try:
         connection = get_connection_DSSB_APP()
         cursor = connection.cursor()
@@ -269,29 +335,29 @@ def create_theory(theory_name, theory_description, theory_start_date, theory_end
         # Get next theory ID
         theory_id = get_next_theory_id()
         
-        # Insert theory records for each user
+        # Count unique users (remove duplicates and empty values)
+        unique_users = set()
+        for iin in user_iins:
+            if iin and str(iin).strip():
+                unique_users.add(str(iin).strip())
+        user_count = len(unique_users)
+        
+        # Insert single campaign record
         insert_sql = """
         INSERT INTO SoftCollection_theories 
-        (IIN, theory_name, theory_description, load_date, theory_start_date, theory_end_date, theory_id, created_by)
+        (theory_id, theory_name, theory_description, load_date, theory_start_date, theory_end_date, user_count, created_by)
         VALUES (:1, :2, :3, SYSDATE, TO_DATE(:4, 'YYYY-MM-DD'), TO_DATE(:5, 'YYYY-MM-DD'), :6, :7)
         """
         
-        users_added = 0
-        for iin in user_iins:
-            try:
-                cursor.execute(insert_sql, (
-                    iin, 
-                    theory_name, 
-                    theory_description,
-                    theory_start_date,
-                    theory_end_date,
-                    theory_id,
-                    created_by
-                ))
-                users_added += 1
-            except Exception as e:
-                print(f"Error inserting IIN {iin}: {e}")
-                continue
+        cursor.execute(insert_sql, (
+            theory_id,
+            theory_name, 
+            theory_description,
+            theory_start_date,
+            theory_end_date,
+            user_count,
+            created_by
+        ))
         
         connection.commit()
         cursor.close()
@@ -299,52 +365,56 @@ def create_theory(theory_name, theory_description, theory_start_date, theory_end
         
         return {
             "success": True,
-            "message": f"Theory '{theory_name}' created successfully",
+            "message": f"Campaign '{theory_name}' created successfully",
             "theory_id": theory_id,
-            "users_added": users_added
+            "users_added": user_count
         }
         
     except Exception as e:
-        print(f"Error creating theory: {e}")
+        print(f"Error creating campaign: {e}")
         return {
             "success": False,
-            "message": f"Failed to create theory: {str(e)}"
+            "message": f"Failed to create campaign: {str(e)}"
         }
 
 def get_active_theories():
-    """Get all currently active theories"""
+    """Get all campaign records with enhanced sorting for both numeric and SC formats"""
     try:
         connection = get_connection_DSSB_APP()
         cursor = connection.cursor()
         
-        # Get theories that are currently active
-        # Updated to handle VARCHAR2 theory_id with proper sorting
+        # Get all campaign records - much simpler now with one record per campaign
         query = """
         SELECT 
             theory_id,
             theory_name,
             theory_description,
-            TO_CHAR(MIN(load_date), 'YYYY-MM-DD') as load_date,
+            TO_CHAR(load_date, 'YYYY-MM-DD') as load_date,
             TO_CHAR(theory_start_date, 'YYYY-MM-DD') as theory_start_date,
             TO_CHAR(theory_end_date, 'YYYY-MM-DD') as theory_end_date,
-            COUNT(*) as user_count,
+            user_count,
             CASE WHEN SYSDATE BETWEEN theory_start_date AND theory_end_date THEN 1 ELSE 0 END as is_active,
-            MAX(created_by) as created_by
+            created_by
         FROM SoftCollection_theories
-        GROUP BY theory_id, theory_name, theory_description, theory_start_date, theory_end_date
         ORDER BY 
             theory_start_date DESC,
             CASE 
+                -- SC format sorting (SC00000001.1, SC00000001.2, etc.)
+                WHEN REGEXP_LIKE(theory_id, '^SC[0-9]{8}\.[0-9]+$') THEN
+                    TO_NUMBER(SUBSTR(theory_id, 3, 8)) * 1000 + TO_NUMBER(SUBSTR(theory_id, INSTR(theory_id, '.') + 1))
+                -- Numeric format sorting (1, 2, 3, 1.1, 1.2, etc.)
                 WHEN REGEXP_LIKE(theory_id, '^[0-9]+(\.[0-9]+)?$') THEN
                     CASE 
                         WHEN INSTR(theory_id, '.') > 0 THEN 
-                            TO_NUMBER(SUBSTR(theory_id, 1, INSTR(theory_id, '.') - 1))
+                            TO_NUMBER(SUBSTR(theory_id, 1, INSTR(theory_id, '.') - 1)) * 1000 + 
+                            TO_NUMBER(SUBSTR(theory_id, INSTR(theory_id, '.') + 1))
                         ELSE 
-                            TO_NUMBER(theory_id)
+                            TO_NUMBER(theory_id) * 1000
                     END
-                ELSE 999999
+                -- Other formats go to the end
+                ELSE 999999999
             END DESC,
-            theory_id
+            theory_id DESC
         """
         
         cursor.execute(query)
@@ -362,15 +432,15 @@ def get_active_theories():
         return {
             "success": True,
             "data": theories,
-            "message": f"Retrieved {len(theories)} theories"
+            "message": f"Retrieved {len(theories)} campaigns"
         }
         
     except Exception as e:
-        print(f"Error getting active theories: {e}")
+        print(f"Error getting campaigns: {e}")
         return {
             "success": False,
             "data": [],
-            "message": f"Failed to get theories: {str(e)}"
+            "message": f"Failed to get campaigns: {str(e)}"
         }
 
 def detect_iin_columns(data):
@@ -398,4 +468,158 @@ def extract_iin_values(data, iin_column):
         if iin_value and str(iin_value).strip():
             iin_values.add(str(iin_value).strip())
     
-    return list(iin_values) 
+    return list(iin_values)
+
+# SC Local Tables Management Functions
+def insert_control_group(theory_id, iin_values, date_start, date_end, additional_fields=None):
+    """Insert control group users into SC_local_control table"""
+    try:
+        connection = get_connection_DSSB_APP()
+        cursor = connection.cursor()
+        
+        # Prepare additional fields (tab1-tab5)
+        tab_fields = additional_fields or {}
+        tab1 = tab_fields.get('tab1', None)
+        tab2 = tab_fields.get('tab2', None)
+        tab3 = tab_fields.get('tab3', None)
+        tab4 = tab_fields.get('tab4', None)
+        tab5 = tab_fields.get('tab5', None)
+        
+        insert_sql = """
+        INSERT INTO SC_local_control 
+        (IIN, THEORY_ID, date_start, date_end, insert_datetime, tab1, tab2, tab3, tab4, tab5)
+        VALUES (:1, :2, TO_DATE(:3, 'YYYY-MM-DD'), TO_DATE(:4, 'YYYY-MM-DD'), SYSDATE, :5, :6, :7, :8, :9)
+        """
+        
+        inserted_count = 0
+        for iin in iin_values:
+            try:
+                cursor.execute(insert_sql, (
+                    str(iin).strip(),
+                    theory_id,
+                    date_start,
+                    date_end,
+                    tab1, tab2, tab3, tab4, tab5
+                ))
+                inserted_count += 1
+            except Exception as e:
+                print(f"Error inserting control IIN {iin}: {e}")
+                continue
+        
+        connection.commit()
+        cursor.close()
+        connection.close()
+        
+        return {
+            "success": True,
+            "inserted_count": inserted_count,
+            "message": f"Inserted {inserted_count} users into control group"
+        }
+        
+    except Exception as e:
+        print(f"Error inserting control group: {e}")
+        return {
+            "success": False,
+            "message": f"Failed to insert control group: {str(e)}"
+        }
+
+def insert_target_groups(theory_id, iin_values, date_start, date_end, additional_fields=None):
+    """Insert target group users into SC_local_target table"""
+    try:
+        connection = get_connection_DSSB_APP()
+        cursor = connection.cursor()
+        
+        # Prepare additional fields (tab1-tab5)
+        tab_fields = additional_fields or {}
+        tab1 = tab_fields.get('tab1', None)
+        tab2 = tab_fields.get('tab2', None)
+        tab3 = tab_fields.get('tab3', None)
+        tab4 = tab_fields.get('tab4', None)
+        tab5 = tab_fields.get('tab5', None)
+        
+        insert_sql = """
+        INSERT INTO SC_local_target 
+        (IIN, THEORY_ID, date_start, date_end, insert_datetime, tab1, tab2, tab3, tab4, tab5)
+        VALUES (:1, :2, TO_DATE(:3, 'YYYY-MM-DD'), TO_DATE(:4, 'YYYY-MM-DD'), SYSDATE, :5, :6, :7, :8, :9)
+        """
+        
+        inserted_count = 0
+        for iin in iin_values:
+            try:
+                cursor.execute(insert_sql, (
+                    str(iin).strip(),
+                    theory_id,
+                    date_start,
+                    date_end,
+                    tab1, tab2, tab3, tab4, tab5
+                ))
+                inserted_count += 1
+            except Exception as e:
+                print(f"Error inserting target IIN {iin}: {e}")
+                continue
+        
+        connection.commit()
+        cursor.close()
+        connection.close()
+        
+        return {
+            "success": True,
+            "inserted_count": inserted_count,
+            "message": f"Inserted {inserted_count} users into target groups"
+        }
+        
+    except Exception as e:
+        print(f"Error inserting target groups: {e}")
+        return {
+            "success": False,
+            "message": f"Failed to insert target groups: {str(e)}"
+        }
+
+def get_sc_local_data(table_name, theory_id=None):
+    """Get data from SC_local_control or SC_local_target tables"""
+    try:
+        connection = get_connection_DSSB_APP()
+        cursor = connection.cursor()
+        
+        # Validate table name for security
+        if table_name not in ['SC_local_control', 'SC_local_target']:
+            raise ValueError("Invalid table name")
+        
+        base_query = f"""
+        SELECT IIN, THEORY_ID, 
+               TO_CHAR(date_start, 'YYYY-MM-DD') as date_start,
+               TO_CHAR(date_end, 'YYYY-MM-DD') as date_end,
+               TO_CHAR(insert_datetime, 'YYYY-MM-DD HH24:MI:SS') as insert_datetime,
+               tab1, tab2, tab3, tab4, tab5
+        FROM {table_name}
+        """
+        
+        if theory_id:
+            query = base_query + " WHERE THEORY_ID = :1 ORDER BY insert_datetime DESC"
+            cursor.execute(query, (theory_id,))
+        else:
+            query = base_query + " ORDER BY insert_datetime DESC"
+            cursor.execute(query)
+        
+        columns = [desc[0].lower() for desc in cursor.description]
+        
+        data = []
+        for row in cursor.fetchall():
+            data.append(dict(zip(columns, row)))
+        
+        cursor.close()
+        connection.close()
+        
+        return {
+            "success": True,
+            "data": data,
+            "message": f"Retrieved {len(data)} records from {table_name}"
+        }
+        
+    except Exception as e:
+        print(f"Error getting SC local data: {e}")
+        return {
+            "success": False,
+            "data": [],
+            "message": f"Failed to get data: {str(e)}"
+        } 

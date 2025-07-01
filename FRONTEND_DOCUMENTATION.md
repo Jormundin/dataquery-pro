@@ -27,18 +27,20 @@ database-interface/
 │   ├── index.html
 │   └── favicon.ico
 ├── src/
+│   ├── pages/
+│   │   ├── Dashboard.js         # Dashboard with statistics and overview
+│   │   ├── QueryBuilder.js      # Visual SQL query builder with pagination
+│   │   ├── DataViewer.js        # Data browsing with server-side pagination
+│   │   ├── Login.js             # LDAP authentication interface
+│   │   ├── ActiveTheories.js    # Theory management interface
+│   │   └── Settings.js          # Application settings and configuration
 │   ├── components/
-│   │   ├── Layout.js          # Main layout with sidebar navigation
-│   │   ├── Dashboard.js       # Dashboard with statistics and overview
-│   │   ├── QueryBuilder.js    # Visual SQL query builder
-│   │   ├── DataViewer.js      # Data browsing and viewing
-│   │   └── Settings.js        # Application settings and configuration
-│   ├── pages/                 # Page components (future expansion)
+│   │   └── Layout.js            # Main layout with sidebar navigation
 │   ├── services/
-│   │   └── api.js            # API service layer for backend communication
-│   ├── App.js                # Main application component with routing
-│   ├── App.css               # Global styles and component styling
-│   └── index.js              # Application entry point
+│   │   └── api.js              # API service layer for backend communication
+│   ├── App.js                  # Main application component with routing
+│   ├── App.css                 # Global styles and component styling
+│   └── index.js                # Application entry point
 ├── package.json
 └── README.md
 ```
@@ -47,26 +49,31 @@ database-interface/
 
 ### 1. Dashboard
 - **Statistics Overview**: Key metrics and database statistics
-- **Recent Queries**: History of executed queries with status
+- **Recent Queries**: History of executed queries with status and user tracking
 - **Database Status**: Real-time connection status monitoring
 - **Quick Actions**: Shortcut buttons for common operations
+- **Performance Optimized**: Handles large user counts efficiently
 
-### 2. Visual Query Builder
+### 2. Visual Query Builder ⚡ **Performance Enhanced**
 - **Database Selection**: Dropdown to choose target database
 - **Table Selection**: Dynamic table loading based on selected database
 - **Column Selection**: Multi-select for choosing columns to retrieve
 - **Dynamic Filters**: Add/remove filters with various operators (=, >, <, LIKE, etc.)
 - **Sorting Options**: Configurable sorting by multiple columns
 - **SQL Preview**: Real-time SQL query generation
-- **Results Display**: Formatted table view of query results
+- **Results Display**: Paginated table view with configurable rows per page
+- **🔥 Large Dataset Support**: Efficiently handles 10,000+ user results with client-side pagination
+- **Theory Creation**: Direct integration with theory management system
+- **Data Stratification**: Advanced statistical data grouping capabilities
 
-### 3. Data Viewer
+### 3. Data Viewer ⚡ **Performance Enhanced**
 - **Table Browsing**: Navigate through database tables
-- **Search Functionality**: Filter data across columns
-- **Pagination**: Handle large datasets efficiently
-- **Sorting**: Click column headers to sort
+- **Search Functionality**: Server-side search with optimized queries
+- **Server-Side Pagination**: Efficient handling of large datasets
+- **Sorting**: Server-side sorting with database optimization
 - **Row Selection**: Select multiple rows for operations
 - **CSV Export**: Export filtered data to CSV format
+- **🔥 High Performance**: Optimized for datasets with 10,000+ records
 
 ### 4. Settings Management
 - **Database Connections**: Configure multiple database connections
@@ -74,12 +81,19 @@ database-interface/
 - **User Preferences**: Language, theme, and display options
 - **Connection Testing**: Validate database connections
 
+### 5. Theory Management
+- **Theory Creation**: Create theories from query results with IIN detection
+- **Active Theories**: View and manage currently active theories
+- **Data Stratification**: Advanced statistical grouping into balanced cohorts
+- **User Assignment**: Automatic user assignment based on query results
+
 ## 🛠 Technical Architecture
 
 ### State Management
 - Uses React hooks (`useState`, `useEffect`) for local state management
 - No external state management library (Redux/Context) currently implemented
 - Component-level state for UI interactions
+- **Pagination State**: Dedicated state management for large dataset handling
 
 ### Routing
 - React Router v6 for navigation
@@ -98,15 +112,39 @@ database-interface/
 - Error handling and loading states
 - Configurable base URL and timeouts
 
+## ⚡ Performance Optimizations
+
+### Large Dataset Handling
+The application has been optimized to handle large datasets (10,000+ users) efficiently:
+
+#### QueryBuilder Optimizations
+- **Client-Side Pagination**: Only renders 25-200 rows at a time instead of all results
+- **Configurable Page Sizes**: Users can choose 25, 50, 100, or 200 rows per page
+- **Memory Optimization**: Dramatic reduction in DOM elements and React rendering overhead
+- **Preserved Functionality**: All existing features (theory creation, stratification) remain intact
+
+#### DataViewer Optimizations  
+- **Server-Side Pagination**: Backend only sends requested page of data
+- **Efficient Database Queries**: Oracle ROWNUM pagination for optimal performance
+- **Server-Side Search**: Search processing done by database, not client
+- **Server-Side Sorting**: Sorting handled by database indexes
+- **Reduced Network Traffic**: Only transfers needed data
+
+#### Performance Metrics
+- **Memory Usage**: Reduced from ~10,000 DOM elements to ~100-200 per page
+- **Initial Render Time**: Dramatically faster initial display of results
+- **Scrolling Performance**: Smooth scrolling with fewer DOM elements
+- **Network Efficiency**: Significant reduction in data transfer
+
 ## 🌍 Localization
 
 ### Current Status
-- **Russian Translation**: Partially implemented
+- **Russian Translation**: Comprehensive implementation
   - ✅ Navigation menu (Layout.js)
   - ✅ Dashboard (complete)
-  - ⚠️ Query Builder (partial)
-  - ❌ Data Viewer (pending)
-  - ❌ Settings (pending)
+  - ✅ Query Builder (complete)
+  - ✅ Data Viewer (complete)
+  - ⚠️ Settings (partial)
 
 ### Adding Translations
 1. Update component files with translated strings
@@ -130,10 +168,16 @@ npm test
 ### Common Development Tasks
 
 #### Adding New Components
-1. Create component file in `src/components/`
+1. Create component file in `src/pages/` or `src/components/`
 2. Add routing in `App.js` if needed
 3. Update navigation in `Layout.js`
 4. Add API endpoints in `services/api.js`
+
+#### Performance Considerations
+- **Large Datasets**: Always implement pagination for data-heavy components
+- **API Optimization**: Use server-side filtering, sorting, and pagination when possible
+- **State Management**: Minimize re-renders with proper state structure
+- **Memory Management**: Clean up event listeners and subscriptions
 
 #### Styling Guidelines
 - Use consistent class naming (BEM-like approach)
@@ -145,12 +189,19 @@ npm test
 - All API calls should go through `services/api.js`
 - Handle loading and error states consistently
 - Use try-catch blocks for error handling
+- Implement proper pagination for large datasets
 
 ## 🐛 Common Issues and Solutions
 
 ### React 18 Compatibility
 **Issue**: ReactDOM.render is deprecated
 **Solution**: Updated to use createRoot API in index.js
+
+### Performance Issues with Large Datasets
+**Issue**: Browser freezing with 10,000+ records
+**Solution**: Implemented comprehensive pagination system
+- QueryBuilder: Client-side pagination with configurable page sizes
+- DataViewer: Server-side pagination with database optimization
 
 ### ESLint Warnings
 **Issue**: Unused imports and variables
@@ -160,9 +211,9 @@ npm test
 **Issue**: Cross-origin requests blocked
 **Solution**: Ensure backend CORS configuration allows frontend domain
 
-### Performance Issues
-**Issue**: Large datasets causing slow rendering
-**Solution**: Implement pagination and virtualization for large tables
+### Memory Leaks
+**Issue**: High memory usage over time
+**Solution**: Proper cleanup of event listeners and state in useEffect cleanup functions
 
 ## 📦 Dependencies
 
@@ -179,9 +230,7 @@ npm test
 ### UI Dependencies
 ```json
 {
-  "lucide-react": "^0.336.0",
-  "@headlessui/react": "^1.7.14",
-  "@heroicons/react": "^2.0.16"
+  "lucide-react": "^0.336.0"
 }
 ```
 
@@ -208,7 +257,7 @@ REACT_APP_ENVIRONMENT=production
 ## 🔒 Security Considerations
 
 ### Authentication
-- Ready for JWT token integration
+- LDAP integration with JWT token management
 - Secure storage of authentication tokens
 - Automatic token refresh capability
 
@@ -230,13 +279,31 @@ REACT_APP_ENVIRONMENT=production
 - Loading states for all async operations
 - Error messages with actionable feedback
 - Responsive design for various screen sizes
+- **Optimized Performance**: Smooth interaction even with large datasets
+
+## 📈 Recent Enhancements (December 2024)
+
+### Performance Improvements
+- ✅ **QueryBuilder Pagination**: Added client-side pagination for large result sets
+- ✅ **DataViewer Server-Side Optimization**: Implemented efficient backend pagination
+- ✅ **Memory Optimization**: Dramatic reduction in DOM elements for better performance
+- ✅ **User Experience**: Maintained all functionality while improving performance
+
+### Bug Fixes
+- ✅ **Theory Detection**: Fixed IIN column detection in query results
+- ✅ **Data Export**: Enhanced CSV export functionality
+- ✅ **Error Handling**: Improved error messages and debugging capabilities
+
+### Feature Additions
+- ✅ **Configurable Pagination**: User-selectable rows per page (25, 50, 100, 200)
+- ✅ **Enhanced Statistics**: Better pagination information display
+- ✅ **Export Functionality**: Direct CSV export from query results
 
 ## 📈 Future Enhancements
 
 ### Planned Features
 - Advanced query templates and saved queries
 - Real-time data updates with WebSocket
-- Advanced filtering and sorting options
 - Data visualization charts and graphs
 - User role management and permissions
 - Advanced export options (Excel, PDF)
@@ -246,7 +313,7 @@ REACT_APP_ENVIRONMENT=production
 - Add comprehensive testing suite
 - Implement PWA capabilities
 - Add dark/light theme toggle
-- Performance optimizations with React.memo
+- Further performance optimizations with React.memo
 
 ## 📞 Support and Maintenance
 
@@ -256,18 +323,21 @@ REACT_APP_ENVIRONMENT=production
 - Monitor network requests in DevTools
 - Check API response formats
 
-### Monitoring
-- Implement error tracking (Sentry)
-- Add performance monitoring
-- Track user interactions (Analytics)
+### Performance Monitoring
+- Monitor memory usage with large datasets
+- Track rendering performance
+- Measure API response times
+- User interaction analytics
 
 ### Updates
 - Regular dependency updates
 - Security patch management
-- Feature enhancement cycles
+- Performance optimization cycles
+- Feature enhancement based on user feedback
 
 ---
 
-**Version**: 1.0.0  
+**Version**: 1.1.0  
 **Last Updated**: December 2024  
-**Maintainer**: Development Team 
+**Maintainer**: Development Team  
+**Performance**: Optimized for 10,000+ record datasets 

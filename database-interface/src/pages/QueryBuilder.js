@@ -50,14 +50,18 @@ const QueryBuilder = () => {
   const [showStratificationModal, setShowStratificationModal] = useState(false);
   const [stratificationConfig, setStratificationConfig] = useState({
     enabled: false,
-    numGroups: 2,
+    numGroups: 3,
     stratifyColumns: [],
     theoryBaseName: '',
     theoryDescription: '',
     theoryStartDate: '',
     theoryEndDate: '',
     iinColumn: '',
-    randomSeed: 42
+    randomSeed: 42,
+    additionalField1: '',
+    additionalField2: '',
+    additionalField3: '',
+    additionalField4: ''
   });
   const [isStratifying, setIsStratifying] = useState(false);
   const [stratificationResults, setStratificationResults] = useState(null);
@@ -428,8 +432,8 @@ const QueryBuilder = () => {
       return;
     }
 
-    if (stratificationConfig.numGroups < 2 || stratificationConfig.numGroups > 5) {
-      setError('Количество групп должно быть от 2 до 5');
+    if (stratificationConfig.numGroups < 3 || stratificationConfig.numGroups > 5) {
+      setError('Количество групп должно быть от 3 до 5');
       return;
     }
 
@@ -1292,11 +1296,13 @@ const QueryBuilder = () => {
                   value={stratificationConfig.numGroups}
                   onChange={(e) => updateStratificationConfig('numGroups', parseInt(e.target.value))}
                 >
-                  <option value={2}>2 группы (A, B)</option>
                   <option value={3}>3 группы (A, B, C)</option>
                   <option value={4}>4 группы (A, B, C, D)</option>
                   <option value={5}>5 групп (A, B, C, D, E)</option>
                 </select>
+                <div style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.25rem' }}>
+                  Минимальное количество групп: 3. Группа A станет контрольной, остальные - целевыми.
+                </div>
               </div>
 
               <div className="form-group">
@@ -1387,6 +1393,62 @@ const QueryBuilder = () => {
                 />
                 <div style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.25rem' }}>
                   Для воспроизводимости результатов стратификации
+                </div>
+              </div>
+
+              {/* Additional fields for SC local tables */}
+              <div style={{ marginTop: '1.5rem', padding: '1rem', backgroundColor: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '6px' }}>
+                <div style={{ fontSize: '0.875rem', fontWeight: '600', color: '#374151', marginBottom: '0.5rem' }}>
+                  📝 Дополнительные поля (необязательно)
+                </div>
+                <div style={{ fontSize: '0.75rem', color: '#6b7280', marginBottom: '1rem' }}>
+                  Эти поля будут сохранены в таблицах SC_local_control и SC_local_target для дополнительной информации
+                </div>
+                
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                  <div className="form-group">
+                    <label className="form-label">Дополнительное поле 1</label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      value={stratificationConfig.additionalField1}
+                      onChange={(e) => updateStratificationConfig('additionalField1', e.target.value)}
+                      placeholder="Дополнительная информация 1"
+                    />
+                  </div>
+                  
+                  <div className="form-group">
+                    <label className="form-label">Дополнительное поле 2</label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      value={stratificationConfig.additionalField2}
+                      onChange={(e) => updateStratificationConfig('additionalField2', e.target.value)}
+                      placeholder="Дополнительная информация 2"
+                    />
+                  </div>
+                  
+                  <div className="form-group">
+                    <label className="form-label">Дополнительное поле 3</label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      value={stratificationConfig.additionalField3}
+                      onChange={(e) => updateStratificationConfig('additionalField3', e.target.value)}
+                      placeholder="Дополнительная информация 3"
+                    />
+                  </div>
+                  
+                  <div className="form-group">
+                    <label className="form-label">Дополнительное поле 4</label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      value={stratificationConfig.additionalField4}
+                      onChange={(e) => updateStratificationConfig('additionalField4', e.target.value)}
+                      placeholder="Дополнительная информация 4"
+                    />
+                  </div>
                 </div>
               </div>
             </div>
