@@ -56,6 +56,24 @@ DEBUG=false
 LOG_LEVEL=INFO
 
 # =====================================================
+# Email Configuration (Campaign Notifications)
+# =====================================================
+# Email settings for campaign success/failure notifications
+# Note: The system has hardcoded email credentials that work out-of-the-box
+# Override these environment variables if you want to use different settings
+
+# SMTP Configuration (optional overrides)
+# EMAIL_SENDER=your-sender@company.com
+# SMTP_SERVER=mail.company.com
+# SMTP_PORT=587
+# SMTP_USERNAME=your-smtp-username
+# SMTP_PASSWORD=your-smtp-password
+
+# Campaign Notification Recipients (optional override)
+# Comma-separated list of email addresses to receive campaign notifications
+# CAMPAIGN_NOTIFICATION_EMAILS=manager@company.com,admin@company.com,analyst@company.com
+
+# =====================================================
 # Database Connection Testing
 # =====================================================
 # Use these commands to test your configuration:

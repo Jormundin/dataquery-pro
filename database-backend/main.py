@@ -638,7 +638,8 @@ async def stratify_and_create_theories(data: Dict[str, Any], current_user: dict 
         
         execution_time = time.time() - start_time
         
-        return {
+        # Prepare response
+        response_data = {
             "success": True,
             "message": f"Успешно создано {len(created_theories)} теорий через стратификацию с базовым Campaign ID {base_campaign_id}",
             "stratification": stratification_result,
@@ -648,10 +649,47 @@ async def stratify_and_create_theories(data: Dict[str, Any], current_user: dict 
             "base_campaign_id": base_campaign_id
         }
         
+        # Send success email notification
+        try:
+            from email_sender import send_campaign_success_notification
+            email_sent = send_campaign_success_notification(response_data, current_user["username"])
+            if email_sent:
+                print(f"Success notification email sent for campaign {base_campaign_id}")
+            else:
+                print(f"Failed to send success notification email for campaign {base_campaign_id}")
+        except Exception as e:
+            print(f"Error sending success notification email: {str(e)}")
+            # Don't fail the entire operation if email fails
+        
+        return response_data
+        
     except HTTPException as he:
+        # Send error email notification for HTTP exceptions
+        try:
+            from email_sender import send_campaign_error_notification
+            error_details = {
+                "error": he.detail,
+                "operation": "Campaign Stratification",
+                "status_code": he.status_code
+            }
+            send_campaign_error_notification(error_details, current_user["username"])
+        except Exception as email_error:
+            print(f"Error sending failure notification email: {str(email_error)}")
+        
         # Re-raise HTTP exceptions as-is
         raise he
     except Exception as e:
+        # Send error email notification for unexpected errors
+        try:
+            from email_sender import send_campaign_error_notification
+            error_details = {
+                "error": f"Неожиданная ошибка стратификации: {str(e)}",
+                "operation": "Campaign Stratification"
+            }
+            send_campaign_error_notification(error_details, current_user["username"])
+        except Exception as email_error:
+            print(f"Error sending failure notification email: {str(email_error)}")
+        
         raise HTTPException(status_code=500, detail=f"Неожиданная ошибка стратификации: {str(e)}")
 
 # Remaining endpoints with authentication protection...
@@ -1106,6 +1144,68 @@ async def test_stratification_dependencies():
         return {
             "overall_status": "❌ Test failed",
             "error": str(e),
+            "timestamp": datetime.now().isoformat()
+        }
+
+@app.post("/test/email-notifications")
+async def test_email_notifications(current_user: dict = Depends(get_current_user_dependency)):
+    """Тестирование email уведомлений"""
+    try:
+        from email_sender import validate_email_config, test_email_notification
+        
+        # Check email configuration
+        if not validate_email_config():
+            return {
+                "status": "❌ ERROR",
+                "message": "Email configuration is invalid",
+                "timestamp": datetime.now().isoformat()
+            }
+        
+        # Send test email
+        test_result = test_email_notification()
+        
+        if test_result:
+            return {
+                "status": "✅ SUCCESS",
+                "message": "Test email notification sent successfully",
+                "test_user": current_user["username"],
+                "timestamp": datetime.now().isoformat()
+            }
+        else:
+            return {
+                "status": "❌ ERROR", 
+                "message": "Failed to send test email notification",
+                "timestamp": datetime.now().isoformat()
+            }
+            
+    except Exception as e:
+        return {
+            "status": "❌ ERROR",
+            "message": f"Error testing email notifications: {str(e)}",
+            "timestamp": datetime.now().isoformat()
+        }
+
+@app.get("/test/email-config")
+async def get_email_config(current_user: dict = Depends(get_current_user_dependency)):
+    """Получить информацию о конфигурации email"""
+    try:
+        from email_sender import (EMAIL_SENDER, SMTP_SERVER, SMTP_PORT, 
+                                SMTP_USERNAME, CAMPAIGN_NOTIFICATION_EMAILS)
+        
+        return {
+            "email_sender": EMAIL_SENDER,
+            "smtp_server": SMTP_SERVER,
+            "smtp_port": SMTP_PORT,
+            "smtp_username": SMTP_USERNAME,
+            "smtp_password_configured": bool(os.getenv('SMTP_PASSWORD') or True),  # Always True for hardcoded
+            "notification_recipients": CAMPAIGN_NOTIFICATION_EMAILS,
+            "recipients_count": len(CAMPAIGN_NOTIFICATION_EMAILS),
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        return {
+            "error": f"Error getting email configuration: {str(e)}",
             "timestamp": datetime.now().isoformat()
         }
 
