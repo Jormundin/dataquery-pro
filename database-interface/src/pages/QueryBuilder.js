@@ -58,10 +58,7 @@ const QueryBuilder = () => {
     theoryEndDate: '',
     iinColumn: '',
     randomSeed: 42,
-    additionalField1: '',
-    additionalField2: '',
-    additionalField3: '',
-    additionalField4: ''
+    groupFields: {}  // Will store { groupIndex: { tab1: '', tab2: '', tab3: '', tab4: '' } }
   });
   const [isStratifying, setIsStratifying] = useState(false);
   const [stratificationResults, setStratificationResults] = useState(null);
@@ -408,13 +405,25 @@ const QueryBuilder = () => {
     nextYear.setFullYear(nextYear.getFullYear() + 1);
     const endDate = nextYear.toISOString().split('T')[0];
     
+    // Initialize group fields for default number of groups
+    const initialGroupFields = {};
+    for (let i = 1; i <= 3; i++) {
+      initialGroupFields[i] = {
+        tab1: '',
+        tab2: '',
+        tab3: '',
+        tab4: ''
+      };
+    }
+    
     setStratificationConfig({
       ...stratificationConfig,
       theoryStartDate: today,
       theoryEndDate: endDate,
       iinColumn: iinInfo.iin_column,
       theoryBaseName: 'Стратифицированная теория',
-      theoryDescription: 'Теория создана через стратификацию данных'
+      theoryDescription: 'Теория создана через стратификацию данных',
+      groupFields: initialGroupFields
     });
     
     setShowStratificationModal(true);
@@ -477,9 +486,47 @@ const QueryBuilder = () => {
   };
 
   const updateStratificationConfig = (field, value) => {
-    setStratificationConfig({
+    let newConfig = {
       ...stratificationConfig,
       [field]: value
+    };
+
+    // Initialize group fields when numGroups changes
+    if (field === 'numGroups') {
+      const newGroupFields = {};
+      for (let i = 1; i <= value; i++) {
+        // Preserve existing values if they exist, otherwise initialize empty
+        newGroupFields[i] = stratificationConfig.groupFields[i] || {
+          tab1: '',
+          tab2: '',
+          tab3: '',
+          tab4: ''
+        };
+      }
+      newConfig.groupFields = newGroupFields;
+    }
+
+    setStratificationConfig(newConfig);
+  };
+
+  const updateGroupField = (groupIndex, fieldName, value) => {
+    // Ensure the group exists, initialize if needed
+    const currentGroupFields = stratificationConfig.groupFields[groupIndex] || {
+      tab1: '',
+      tab2: '',
+      tab3: '',
+      tab4: ''
+    };
+
+    setStratificationConfig({
+      ...stratificationConfig,
+      groupFields: {
+        ...stratificationConfig.groupFields,
+        [groupIndex]: {
+          ...currentGroupFields,
+          [fieldName]: value
+        }
+      }
     });
   };
 
@@ -1399,57 +1446,81 @@ const QueryBuilder = () => {
               {/* Additional fields for SC local tables */}
               <div style={{ marginTop: '1.5rem', padding: '1rem', backgroundColor: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '6px' }}>
                 <div style={{ fontSize: '0.875rem', fontWeight: '600', color: '#374151', marginBottom: '0.5rem' }}>
-                  📝 Дополнительные поля (необязательно)
+                  📝 Дополнительные поля для каждой группы (необязательно)
                 </div>
                 <div style={{ fontSize: '0.75rem', color: '#6b7280', marginBottom: '1rem' }}>
-                  Эти поля будут сохранены в таблицах SC_local_control и SC_local_target для дополнительной информации
+                  Укажите дополнительные поля для каждой группы отдельно. Группа A → SC_local_control (контроль), остальные → SC_local_target (целевые)
                 </div>
                 
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-                  <div className="form-group">
-                    <label className="form-label">Дополнительное поле 1</label>
-                    <input
-                      type="text"
-                      className="form-input"
-                      value={stratificationConfig.additionalField1}
-                      onChange={(e) => updateStratificationConfig('additionalField1', e.target.value)}
-                      placeholder="Дополнительная информация 1"
-                    />
-                  </div>
+                {/* Generate fields for each group */}
+                {Array.from({ length: stratificationConfig.numGroups }, (_, i) => {
+                  const groupIndex = i + 1;
+                  const groupLetter = String.fromCharCode(65 + i);
+                  const groupType = i === 0 ? 'контроль' : 'целевая';
+                  const groupFields = stratificationConfig.groupFields[groupIndex] || { tab1: '', tab2: '', tab3: '', tab4: '' };
                   
-                  <div className="form-group">
-                    <label className="form-label">Дополнительное поле 2</label>
-                    <input
-                      type="text"
-                      className="form-input"
-                      value={stratificationConfig.additionalField2}
-                      onChange={(e) => updateStratificationConfig('additionalField2', e.target.value)}
-                      placeholder="Дополнительная информация 2"
-                    />
-                  </div>
-                  
-                  <div className="form-group">
-                    <label className="form-label">Дополнительное поле 3</label>
-                    <input
-                      type="text"
-                      className="form-input"
-                      value={stratificationConfig.additionalField3}
-                      onChange={(e) => updateStratificationConfig('additionalField3', e.target.value)}
-                      placeholder="Дополнительная информация 3"
-                    />
-                  </div>
-                  
-                  <div className="form-group">
-                    <label className="form-label">Дополнительное поле 4</label>
-                    <input
-                      type="text"
-                      className="form-input"
-                      value={stratificationConfig.additionalField4}
-                      onChange={(e) => updateStratificationConfig('additionalField4', e.target.value)}
-                      placeholder="Дополнительная информация 4"
-                    />
-                  </div>
-                </div>
+                  return (
+                    <div key={groupIndex} style={{ 
+                      marginBottom: '1.5rem', 
+                      padding: '1rem', 
+                      backgroundColor: i === 0 ? '#f0f9ff' : '#f0fdf4', 
+                      border: `1px solid ${i === 0 ? '#bfdbfe' : '#bbf7d0'}`, 
+                      borderRadius: '6px' 
+                    }}>
+                      <div style={{ fontSize: '0.875rem', fontWeight: '600', color: '#374151', marginBottom: '0.75rem' }}>
+                        🎯 Группа {groupLetter} ({groupType})
+                        {i === 0 && <span style={{ fontSize: '0.75rem', color: '#1e40af', marginLeft: '0.5rem' }}>→ SC_local_control</span>}
+                        {i !== 0 && <span style={{ fontSize: '0.75rem', color: '#059669', marginLeft: '0.5rem' }}>→ SC_local_target</span>}
+                      </div>
+                      
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                        <div className="form-group">
+                          <label className="form-label">Поле 1 (tab1)</label>
+                          <input
+                            type="text"
+                            className="form-input"
+                            value={groupFields.tab1}
+                            onChange={(e) => updateGroupField(groupIndex, 'tab1', e.target.value)}
+                            placeholder={`Поле 1 для группы ${groupLetter}`}
+                          />
+                        </div>
+                        
+                        <div className="form-group">
+                          <label className="form-label">Поле 2 (tab2)</label>
+                          <input
+                            type="text"
+                            className="form-input"
+                            value={groupFields.tab2}
+                            onChange={(e) => updateGroupField(groupIndex, 'tab2', e.target.value)}
+                            placeholder={`Поле 2 для группы ${groupLetter}`}
+                          />
+                        </div>
+                        
+                        <div className="form-group">
+                          <label className="form-label">Поле 3 (tab3)</label>
+                          <input
+                            type="text"
+                            className="form-input"
+                            value={groupFields.tab3}
+                            onChange={(e) => updateGroupField(groupIndex, 'tab3', e.target.value)}
+                            placeholder={`Поле 3 для группы ${groupLetter}`}
+                          />
+                        </div>
+                        
+                        <div className="form-group">
+                          <label className="form-label">Поле 4 (tab4)</label>
+                          <input
+                            type="text"
+                            className="form-input"
+                            value={groupFields.tab4}
+                            onChange={(e) => updateGroupField(groupIndex, 'tab4', e.target.value)}
+                            placeholder={`Поле 4 для группы ${groupLetter}`}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
             

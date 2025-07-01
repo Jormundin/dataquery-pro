@@ -174,15 +174,30 @@ async def list_columns(database_id: str, table_name: str, current_user: dict = D
 
 @app.post("/databases/test-connection", response_model=ConnectionTestResponse)
 async def test_db_connection(request: Optional[ConnectionTestRequest] = None, current_user: dict = Depends(get_current_user_dependency)):
-    """Тестирование подключения к базе данных"""
+    """Тестирование подключения к базе данных DSSB_APP"""
     try:
         result = test_connection()
         return result
     except Exception as e:
         return {
             "status": "error",
-            "message": f"Ошибка тестирования соединения: {str(e)}",
+            "message": f"Ошибка тестирования соединения DSSB_APP: {str(e)}",
             "connected": False
+        }
+
+@app.post("/databases/test-all-connections")
+async def test_all_db_connections(current_user: dict = Depends(get_current_user_dependency)):
+    """Тестирование подключения к обеим базам данных (DSSB_APP и SPSS)"""
+    try:
+        from database import test_all_connections
+        result = test_all_connections()
+        return result
+    except Exception as e:
+        return {
+            "overall_status": "error",
+            "message": f"Ошибка тестирования соединений: {str(e)}",
+            "dssb_app": {"status": "error", "connected": False, "message": str(e)},
+            "spss": {"status": "error", "connected": False, "message": str(e)}
         }
 
 # Protected Query endpoints
@@ -525,7 +540,13 @@ async def stratify_and_create_theories(data: Dict[str, Any], current_user: dict 
         
         created_theories = []
         control_group_inserted = False
-        target_groups_iins = []  # Collect all target group IINs
+        
+        # Helper function to get group-specific field from the new frontend structure
+        def get_group_field(group_index, field_name):
+            """Get field value for specific group from groupFields structure"""
+            group_fields = stratification_config.get('groupFields', {})
+            group_data = group_fields.get(str(group_index + 1), {})  # Frontend uses 1-based indexing
+            return group_data.get(field_name, None) or None
         
         for i, group in enumerate(stratification_result.get("stratified_groups", [])):
             group_letter = chr(65 + i)  # A, B, C, D, E
@@ -549,13 +570,13 @@ async def stratify_and_create_theories(data: Dict[str, Any], current_user: dict 
             # Create sub-ID for this group (e.g., SC00000001.1, SC00000001.2, SC00000001.3)
             sub_theory_id = f"{base_campaign_id}.{i + 1}"
             
-            # Prepare additional fields for SC local tables
+            # Prepare group-specific additional fields for SC local tables
             additional_fields = {
-                'tab1': theory_description,
-                'tab2': stratification_config.get('additionalField1', None),
-                'tab3': stratification_config.get('additionalField2', None),
-                'tab4': stratification_config.get('additionalField3', None),
-                'tab5': stratification_config.get('additionalField4', None)
+                'tab1': get_group_field(i, 'tab1') or theory_description,  # Use group-specific tab1 or fall back to description
+                'tab2': get_group_field(i, 'tab2'),
+                'tab3': get_group_field(i, 'tab3'),
+                'tab4': get_group_field(i, 'tab4'),
+                'tab5': None  # Keep tab5 as None for now, can be used for future expansion
             }
             
             # Insert theory using custom ID function
@@ -584,8 +605,15 @@ async def stratify_and_create_theories(data: Dict[str, Any], current_user: dict 
                         control_group_inserted = True
                         print(f"Control group result: {control_result}")
                     else:
-                        # Collect IINs for target groups (Groups B, C, D, E)
-                        target_groups_iins.extend(iin_values)
+                        # Insert each target group separately with its specific sub-ID
+                        target_result = insert_target_groups(
+                            sub_theory_id,  # Use the specific sub-ID, not base campaign ID
+                            iin_values,
+                            theory_start_date,
+                            theory_end_date,
+                            additional_fields
+                        )
+                        print(f"Target group {group_letter} result: {target_result}")
                     
                     created_theories.append({
                         "theory_id": theory_result.get("theory_id"),
@@ -604,22 +632,6 @@ async def stratify_and_create_theories(data: Dict[str, Any], current_user: dict 
                 print(f"Error creating theory for group {group_letter}: {e}")
                 # Continue with other groups even if one fails
                 continue
-        
-        # Insert all target groups into SC_local_target
-        if target_groups_iins:
-            try:
-                # Use the base campaign ID for target groups (they all belong to same campaign)
-                target_result = insert_target_groups(
-                    base_campaign_id,  # Use base campaign ID, not sub-ID
-                    target_groups_iins,
-                    theory_start_date,
-                    theory_end_date,
-                    additional_fields
-                )
-                print(f"Target groups result: {target_result}")
-            except Exception as e:
-                print(f"Error inserting target groups: {e}")
-                # Don't fail the entire operation for this
         
         if not created_theories:
             raise HTTPException(status_code=500, detail="Не удалось создать ни одной теории")

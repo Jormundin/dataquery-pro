@@ -99,6 +99,31 @@ def get_connection_DSSB_APP():
         print(f"Unexpected error in database connection: {str(e)}")
         raise
 
+def get_connection_SPSS():
+    """Establish a connection to the SPSS database"""
+    try:
+        # Get SPSS database configuration from environment variables
+        spss_host = os.getenv('SPSS_ORACLE_HOST', '')
+        spss_port = os.getenv('SPSS_ORACLE_PORT', '1521')
+        spss_sid = os.getenv('SPSS_ORACLE_SID', '')
+        spss_user = os.getenv('SPSS_ORACLE_USER', '')
+        spss_password = os.getenv('SPSS_ORACLE_PASSWORD', '')
+        
+        if not all([spss_host, spss_sid, spss_user, spss_password]):
+            raise ValueError("Missing required SPSS database environment variables. Please check SPSS_ORACLE_HOST, SPSS_ORACLE_SID, SPSS_ORACLE_USER, and SPSS_ORACLE_PASSWORD.")
+        
+        dsn = cx_Oracle.makedsn(spss_host, spss_port, sid=spss_sid)
+        return cx_Oracle.connect(user=spss_user, password=spss_password, dsn=dsn)
+    except cx_Oracle.Error as e:
+        print(f"SPSS Database connection error: {str(e)}")
+        raise
+    except ValueError as e:
+        print(f"SPSS Configuration error: {str(e)}")
+        raise
+    except Exception as e:
+        print(f"Unexpected error in SPSS database connection: {str(e)}")
+        raise
+
 def test_connection() -> Dict:
     """Test database connection and return status"""
     try:
@@ -111,15 +136,49 @@ def test_connection() -> Dict:
         
         return {
             "status": "success",
-            "message": "Соединение с базой данных установлено успешно",
+            "message": "Соединение с базой данных DSSB_APP установлено успешно",
             "connected": True
         }
     except Exception as e:
         return {
             "status": "error", 
-            "message": f"Ошибка подключения к базе данных: {str(e)}",
+            "message": f"Ошибка подключения к базе данных DSSB_APP: {str(e)}",
             "connected": False
         }
+
+def test_spss_connection() -> Dict:
+    """Test SPSS database connection and return status"""
+    try:
+        conn = get_connection_SPSS()
+        cursor = conn.cursor()
+        cursor.execute("SELECT 1 FROM DUAL")
+        result = cursor.fetchone()
+        cursor.close()
+        conn.close()
+        
+        return {
+            "status": "success",
+            "message": "Соединение с базой данных SPSS установлено успешно",
+            "connected": True
+        }
+    except Exception as e:
+        return {
+            "status": "error", 
+            "message": f"Ошибка подключения к базе данных SPSS: {str(e)}",
+            "connected": False
+        }
+
+def test_all_connections() -> Dict:
+    """Test both DSSB_APP and SPSS database connections"""
+    dssb_result = test_connection()
+    spss_result = test_spss_connection()
+    
+    return {
+        "dssb_app": dssb_result,
+        "spss": spss_result,
+        "overall_status": "success" if dssb_result["connected"] and spss_result["connected"] else "partial" if dssb_result["connected"] or spss_result["connected"] else "error",
+        "message": f"DSSB_APP: {dssb_result['status']}, SPSS: {spss_result['status']}"
+    }
 
 def get_databases() -> List[Dict]:
     """Get list of available databases"""
@@ -523,10 +582,10 @@ def insert_control_group(theory_id, iin_values, date_start, date_end, additional
             "message": f"Failed to insert control group: {str(e)}"
         }
 
-def insert_target_groups(theory_id, iin_values, date_start, date_end, additional_fields=None):
-    """Insert target group users into SC_local_target table"""
+def insert_into_spss_theory_users(theory_id, iin_values, date_start, date_end, additional_fields=None):
+    """Insert target group users into SC_theory_users table in SPSS database"""
     try:
-        connection = get_connection_DSSB_APP()
+        connection = get_connection_SPSS()
         cursor = connection.cursor()
         
         # Prepare additional fields (tab1-tab5)
@@ -538,7 +597,7 @@ def insert_target_groups(theory_id, iin_values, date_start, date_end, additional
         tab5 = tab_fields.get('tab5', None)
         
         insert_sql = """
-        INSERT INTO SC_local_target 
+        INSERT INTO SC_theory_users 
         (IIN, THEORY_ID, date_start, date_end, insert_datetime, tab1, tab2, tab3, tab4, tab5)
         VALUES (:1, :2, TO_DATE(:3, 'YYYY-MM-DD'), TO_DATE(:4, 'YYYY-MM-DD'), SYSDATE, :5, :6, :7, :8, :9)
         """
@@ -555,7 +614,7 @@ def insert_target_groups(theory_id, iin_values, date_start, date_end, additional
                 ))
                 inserted_count += 1
             except Exception as e:
-                print(f"Error inserting target IIN {iin}: {e}")
+                print(f"Error inserting target IIN {iin} into SPSS: {e}")
                 continue
         
         connection.commit()
@@ -565,15 +624,120 @@ def insert_target_groups(theory_id, iin_values, date_start, date_end, additional
         return {
             "success": True,
             "inserted_count": inserted_count,
-            "message": f"Inserted {inserted_count} users into target groups"
+            "message": f"Inserted {inserted_count} users into SPSS SC_theory_users table"
         }
         
     except Exception as e:
-        print(f"Error inserting target groups: {e}")
+        print(f"Error inserting into SPSS SC_theory_users: {e}")
         return {
             "success": False,
-            "message": f"Failed to insert target groups: {str(e)}"
+            "message": f"Failed to insert into SPSS SC_theory_users: {str(e)}"
         }
+
+def insert_target_groups(theory_id, iin_values, date_start, date_end, additional_fields=None):
+    """Insert target group users into SC_local_target table and duplicate to SPSS SC_theory_users table"""
+    results = {
+        "dssb_app": None,
+        "spss": None,
+        "overall_success": False,
+        "total_inserted": 0,
+        "messages": []
+    }
+    
+    # Prepare additional fields (tab1-tab5)
+    tab_fields = additional_fields or {}
+    tab1 = tab_fields.get('tab1', None)
+    tab2 = tab_fields.get('tab2', None)
+    tab3 = tab_fields.get('tab3', None)
+    tab4 = tab_fields.get('tab4', None)
+    tab5 = tab_fields.get('tab5', None)
+    
+    # 1. Insert into DSSB_APP SC_local_target table
+    try:
+        connection = get_connection_DSSB_APP()
+        cursor = connection.cursor()
+        
+        insert_sql = """
+        INSERT INTO SC_local_target 
+        (IIN, THEORY_ID, date_start, date_end, insert_datetime, tab1, tab2, tab3, tab4, tab5)
+        VALUES (:1, :2, TO_DATE(:3, 'YYYY-MM-DD'), TO_DATE(:4, 'YYYY-MM-DD'), SYSDATE, :5, :6, :7, :8, :9)
+        """
+        
+        dssb_inserted_count = 0
+        for iin in iin_values:
+            try:
+                cursor.execute(insert_sql, (
+                    str(iin).strip(),
+                    theory_id,
+                    date_start,
+                    date_end,
+                    tab1, tab2, tab3, tab4, tab5
+                ))
+                dssb_inserted_count += 1
+            except Exception as e:
+                print(f"Error inserting target IIN {iin} into DSSB_APP: {e}")
+                continue
+        
+        connection.commit()
+        cursor.close()
+        connection.close()
+        
+        results["dssb_app"] = {
+            "success": True,
+            "inserted_count": dssb_inserted_count,
+            "message": f"Inserted {dssb_inserted_count} users into DSSB_APP SC_local_target"
+        }
+        results["total_inserted"] += dssb_inserted_count
+        results["messages"].append(f"DSSB_APP: {dssb_inserted_count} users inserted into SC_local_target")
+        
+    except Exception as e:
+        print(f"Error inserting target groups into DSSB_APP: {e}")
+        results["dssb_app"] = {
+            "success": False,
+            "message": f"Failed to insert into DSSB_APP SC_local_target: {str(e)}"
+        }
+        results["messages"].append(f"DSSB_APP Error: {str(e)}")
+    
+    # 2. Duplicate insert into SPSS SC_theory_users table
+    try:
+        spss_result = insert_into_spss_theory_users(theory_id, iin_values, date_start, date_end, additional_fields)
+        results["spss"] = spss_result
+        
+        if spss_result["success"]:
+            results["total_inserted"] += spss_result["inserted_count"]
+            results["messages"].append(f"SPSS: {spss_result['inserted_count']} users inserted into SC_theory_users")
+        else:
+            results["messages"].append(f"SPSS Error: {spss_result['message']}")
+            
+    except Exception as e:
+        print(f"Error duplicating to SPSS: {e}")
+        results["spss"] = {
+            "success": False,
+            "message": f"Failed to duplicate to SPSS: {str(e)}"
+        }
+        results["messages"].append(f"SPSS Error: {str(e)}")
+    
+    # Determine overall success
+    dssb_success = results["dssb_app"] and results["dssb_app"]["success"]
+    spss_success = results["spss"] and results["spss"]["success"]
+    
+    # Overall success if at least DSSB_APP succeeded (SPSS is bonus)
+    results["overall_success"] = dssb_success
+    
+    # Create consolidated response
+    if dssb_success and spss_success:
+        message = f"Successfully inserted into both databases: {results['messages'][0]}, {results['messages'][1]}"
+    elif dssb_success:
+        message = f"Primary insertion successful: {results['messages'][0]}. SPSS duplication failed: {results['messages'][1] if len(results['messages']) > 1 else 'Unknown error'}"
+    else:
+        message = f"Primary insertion failed: {results['messages'][0] if results['messages'] else 'Unknown error'}"
+    
+    return {
+        "success": results["overall_success"],
+        "inserted_count": results["dssb_app"]["inserted_count"] if results["dssb_app"] and results["dssb_app"]["success"] else 0,
+        "message": message,
+        "detailed_results": results
+    }
 
 def get_sc_local_data(table_name, theory_id=None):
     """Get data from SC_local_control or SC_local_target tables"""
