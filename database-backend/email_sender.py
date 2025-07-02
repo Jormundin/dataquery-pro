@@ -503,4 +503,490 @@ if __name__ == "__main__":
             print("❌ Failed to send test email")
     else:
         print("❌ Email configuration is invalid")
-        print("Please check your email configuration and try again.") 
+        print("Please check your email configuration and try again.")
+
+# =============================================================================
+# DAILY DISTRIBUTION NOTIFICATION FUNCTIONS
+# =============================================================================
+
+def create_daily_distribution_success_email(process_result: Dict[str, Any]) -> tuple:
+    """
+    Create email content for successful daily distribution process
+    
+    Args:
+        process_result: Result from successful daily distribution
+    
+    Returns:
+        tuple: (subject, html_message)
+    """
+    campaigns_found = process_result.get('campaigns_found', 0)
+    users_found = process_result.get('users_found', 0)
+    users_distributed = process_result.get('users_distributed', 0)
+    timestamp = process_result.get('timestamp', datetime.now().isoformat())
+    detailed_results = process_result.get('detailed_results', {})
+    
+    subject = f"✅ SoftCollection: Ежедневная дистрибуция завершена - {users_distributed} пользователей распределено"
+    
+    # Create campaigns table
+    campaigns_html = ""
+    if detailed_results.get('campaigns'):
+        for campaign in detailed_results['campaigns']:
+            campaigns_html += f"""
+            <tr>
+                <td style="padding: 8px; border: 1px solid #ddd;">{campaign.get('theory_id', 'N/A')}</td>
+                <td style="padding: 8px; border: 1px solid #ddd;">{campaign.get('theory_name', 'N/A')}</td>
+                <td style="padding: 8px; border: 1px solid #ddd;">{campaign.get('theory_start_date', 'N/A')}</td>
+                <td style="padding: 8px; border: 1px solid #ddd;">{campaign.get('theory_end_date', 'N/A')}</td>
+                <td style="padding: 8px; border: 1px solid #ddd;">{campaign.get('user_count', 0):,}</td>
+            </tr>
+            """
+    
+    # Create distribution results table
+    distribution_html = ""
+    if detailed_results.get('insertion_results'):
+        for result in detailed_results['insertion_results']:
+            theory_id = result.get('theory_id', 'N/A')
+            campaign_name = result.get('campaign_name', 'N/A')
+            total_inserted = result.get('total_inserted', 0)
+            success_status = "✅ Успешно" if result.get('success', False) else "❌ Ошибка"
+            
+            # Group details
+            group_details = []
+            for group_letter, group_result in result.get('group_results', {}).items():
+                table_name = group_result.get('target_table', 'N/A')
+                inserted_count = group_result.get('inserted_count', 0)
+                group_details.append(f"Группа {group_letter}: {inserted_count} → {table_name}")
+            
+            distribution_html += f"""
+            <tr>
+                <td style="padding: 8px; border: 1px solid #ddd;">{theory_id}</td>
+                <td style="padding: 8px; border: 1px solid #ddd;">{campaign_name}</td>
+                <td style="padding: 8px; border: 1px solid #ddd;">{total_inserted:,}</td>
+                <td style="padding: 8px; border: 1px solid #ddd;">{success_status}</td>
+                <td style="padding: 8px; border: 1px solid #ddd; font-size: 12px;">
+                    {"<br>".join(group_details)}
+                </td>
+            </tr>
+            """
+    
+    html_message = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <title>Уведомление о ежедневной дистрибуции</title>
+    </head>
+    <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 900px; margin: 0 auto; padding: 20px;">
+        <div style="background: linear-gradient(135deg, #27ae60 0%, #2ecc71 100%); color: white; padding: 30px; border-radius: 10px; margin-bottom: 30px;">
+            <h1 style="margin: 0; font-size: 28px;">
+                ✅ Ежедневная дистрибуция завершена успешно
+            </h1>
+            <p style="margin: 10px 0 0 0; font-size: 16px; opacity: 0.9;">
+                SoftCollection Автоматическая Система Дистрибуции
+            </p>
+        </div>
+        
+        <div style="background: #f8f9fa; padding: 25px; border-radius: 8px; margin-bottom: 25px;">
+            <h2 style="color: #2c3e50; margin-top: 0;">📊 Сводка процесса</h2>
+            <table style="width: 100%; border-collapse: collapse; background: white; border-radius: 5px; overflow: hidden; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                <tr style="background: #27ae60; color: white;">
+                    <th style="padding: 12px; text-align: left;">Параметр</th>
+                    <th style="padding: 12px; text-align: left;">Значение</th>
+                </tr>
+                <tr>
+                    <td style="padding: 10px; border-bottom: 1px solid #eee;">
+                        <strong>Время выполнения</strong>
+                    </td>
+                    <td style="padding: 10px; border-bottom: 1px solid #eee;">
+                        {datetime.fromisoformat(timestamp.replace('Z', '+00:00')).strftime('%d.%m.%Y %H:%M:%S')}
+                    </td>
+                </tr>
+                <tr>
+                    <td style="padding: 10px; border-bottom: 1px solid #eee;">
+                        <strong>Активных кампаний найдено</strong>
+                    </td>
+                    <td style="padding: 10px; border-bottom: 1px solid #eee;">
+                        <span style="font-size: 18px; font-weight: bold; color: #3498db;">{campaigns_found}</span>
+                    </td>
+                </tr>
+                <tr>
+                    <td style="padding: 10px; border-bottom: 1px solid #eee;">
+                        <strong>Пользователей COUNT_DAY=5 найдено</strong>
+                    </td>
+                    <td style="padding: 10px; border-bottom: 1px solid #eee;">
+                        <span style="font-size: 18px; font-weight: bold; color: #e67e22;">{users_found:,}</span>
+                    </td>
+                </tr>
+                <tr>
+                    <td style="padding: 10px;">
+                        <strong>Пользователей распределено</strong>
+                    </td>
+                    <td style="padding: 10px;">
+                        <span style="font-size: 18px; font-weight: bold; color: #27ae60;">{users_distributed:,}</span>
+                    </td>
+                </tr>
+            </table>
+        </div>
+        
+        <div style="background: #f8f9fa; padding: 25px; border-radius: 8px; margin-bottom: 25px;">
+            <h2 style="color: #2c3e50; margin-top: 0;">🎯 Активные кампании</h2>
+            <table style="width: 100%; border-collapse: collapse; background: white; border-radius: 5px; overflow: hidden; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                <thead>
+                    <tr style="background: #3498db; color: white;">
+                        <th style="padding: 12px; text-align: left;">ID Кампании</th>
+                        <th style="padding: 12px; text-align: left;">Название</th>
+                        <th style="padding: 12px; text-align: left;">Дата начала</th>
+                        <th style="padding: 12px; text-align: left;">Дата окончания</th>
+                        <th style="padding: 12px; text-align: left;">Текущий размер</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {campaigns_html}
+                </tbody>
+            </table>
+        </div>
+        
+        <div style="background: #f8f9fa; padding: 25px; border-radius: 8px; margin-bottom: 25px;">
+            <h2 style="color: #2c3e50; margin-top: 0;">📈 Результаты дистрибуции</h2>
+            <table style="width: 100%; border-collapse: collapse; background: white; border-radius: 5px; overflow: hidden; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                <thead>
+                    <tr style="background: #27ae60; color: white;">
+                        <th style="padding: 12px; text-align: left;">ID Кампании</th>
+                        <th style="padding: 12px; text-align: left;">Название</th>
+                        <th style="padding: 12px; text-align: left;">Добавлено пользователей</th>
+                        <th style="padding: 12px; text-align: left;">Статус</th>
+                        <th style="padding: 12px; text-align: left;">Детали по группам</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {distribution_html}
+                </tbody>
+            </table>
+        </div>
+        
+        <div style="background: #e8f5e8; border: 1px solid #c3e6c3; padding: 20px; border-radius: 8px; margin-bottom: 25px;">
+            <h3 style="color: #2d5a2d; margin-top: 0;">💡 Информация о размещении данных</h3>
+            <ul style="margin: 0; padding-left: 20px;">
+                <li><strong>Группа A (контроль):</strong> размещена в <code>DSSB_APP.SC_local_control</code></li>
+                <li><strong>Группы B, C, D, E (целевые):</strong> размещены в <code>DSSB_APP.SC_local_target</code> и <code>SPSS.SC_theory_users</code></li>
+                <li><strong>Источник данных:</strong> <code>SPSS_USER_DRACRM.SC_1_120</code> (COUNT_DAY = 5)</li>
+            </ul>
+        </div>
+        
+        <div style="background: #fff3cd; border: 1px solid #ffeaa7; padding: 15px; border-radius: 5px; margin-bottom: 20px;">
+            <p style="margin: 0; color: #856404;">
+                <strong>🔄 Следующее выполнение:</strong> завтра в 09:00 (время Алматы)
+            </p>
+        </div>
+        
+        <div style="text-align: center; padding: 20px; color: #666; font-size: 14px; border-top: 1px solid #eee;">
+            <p>SoftCollection - Автоматическая Система Дистрибуции</p>
+            <p>Время отправки: {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}</p>
+        </div>
+    </body>
+    </html>
+    """
+    
+    return subject, html_message
+
+def create_daily_distribution_skip_email(process_result: Dict[str, Any]) -> tuple:
+    """
+    Create email content when daily distribution is skipped
+    
+    Args:
+        process_result: Result from skipped daily distribution
+    
+    Returns:
+        tuple: (subject, html_message)
+    """
+    skip_reason = process_result.get('skip_reason', 'unknown')
+    timestamp = process_result.get('timestamp', datetime.now().isoformat())
+    campaigns_found = process_result.get('campaigns_found', 0)
+    users_found = process_result.get('users_found', 0)
+    
+    skip_reasons = {
+        'no_active_campaigns': 'Нет активных кампаний',
+        'no_count_day_5_users': 'Нет пользователей с COUNT_DAY = 5'
+    }
+    
+    skip_message = skip_reasons.get(skip_reason, f'Неизвестная причина: {skip_reason}')
+    
+    subject = f"⏭️ SoftCollection: Ежедневная дистрибуция пропущена - {skip_message}"
+    
+    html_message = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <title>Ежедневная дистрибуция пропущена</title>
+    </head>
+    <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 800px; margin: 0 auto; padding: 20px;">
+        <div style="background: linear-gradient(135deg, #f39c12 0%, #e67e22 100%); color: white; padding: 30px; border-radius: 10px; margin-bottom: 30px;">
+            <h1 style="margin: 0; font-size: 28px;">
+                ⏭️ Ежедневная дистрибуция пропущена
+            </h1>
+            <p style="margin: 10px 0 0 0; font-size: 16px; opacity: 0.9;">
+                SoftCollection Автоматическая Система Дистрибуции
+            </p>
+        </div>
+        
+        <div style="background: #fff3cd; border: 1px solid #ffeaa7; padding: 25px; border-radius: 8px; margin-bottom: 25px;">
+            <h2 style="color: #856404; margin-top: 0;">ℹ️ Информация о пропуске</h2>
+            <table style="width: 100%; border-collapse: collapse; background: white; border-radius: 5px; overflow: hidden; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                <tr style="background: #f39c12; color: white;">
+                    <th style="padding: 12px; text-align: left;">Параметр</th>
+                    <th style="padding: 12px; text-align: left;">Значение</th>
+                </tr>
+                <tr>
+                    <td style="padding: 10px; border-bottom: 1px solid #eee;">
+                        <strong>Время выполнения</strong>
+                    </td>
+                    <td style="padding: 10px; border-bottom: 1px solid #eee;">
+                        {datetime.fromisoformat(timestamp.replace('Z', '+00:00')).strftime('%d.%m.%Y %H:%M:%S')}
+                    </td>
+                </tr>
+                <tr>
+                    <td style="padding: 10px; border-bottom: 1px solid #eee;">
+                        <strong>Причина пропуска</strong>
+                    </td>
+                    <td style="padding: 10px; border-bottom: 1px solid #eee;">
+                        <span style="font-weight: bold; color: #f39c12;">{skip_message}</span>
+                    </td>
+                </tr>
+                <tr>
+                    <td style="padding: 10px; border-bottom: 1px solid #eee;">
+                        <strong>Активных кампаний найдено</strong>
+                    </td>
+                    <td style="padding: 10px; border-bottom: 1px solid #eee;">
+                        {campaigns_found}
+                    </td>
+                </tr>
+                <tr>
+                    <td style="padding: 10px;">
+                        <strong>Пользователей COUNT_DAY=5 найдено</strong>
+                    </td>
+                    <td style="padding: 10px;">
+                        {users_found:,}
+                    </td>
+                </tr>
+            </table>
+        </div>
+        
+        <div style="background: #e6fffa; border: 1px solid #81e6d9; padding: 20px; border-radius: 8px; margin-bottom: 25px;">
+            <h3 style="color: #234e52; margin-top: 0;">💡 Это нормально!</h3>
+            <p>Автоматическая дистрибуция пропускается в следующих случаях:</p>
+            <ul>
+                <li><strong>Нет активных кампаний:</strong> В данный момент нет кампаний со статусом "активный"</li>
+                <li><strong>Нет новых пользователей:</strong> В таблице SPSS_USER_DRACRM.SC_1_120 не найдено пользователей с COUNT_DAY = 5</li>
+            </ul>
+            <p>Система продолжит проверку завтра в 09:00.</p>
+        </div>
+        
+        <div style="background: #fff3cd; border: 1px solid #ffeaa7; padding: 15px; border-radius: 5px; margin-bottom: 20px;">
+            <p style="margin: 0; color: #856404;">
+                <strong>🔄 Следующая проверка:</strong> завтра в 09:00 (время Алматы)
+            </p>
+        </div>
+        
+        <div style="text-align: center; padding: 20px; color: #666; font-size: 14px; border-top: 1px solid #eee;">
+            <p>SoftCollection - Автоматическая Система Дистрибуции</p>
+            <p>Время отправки: {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}</p>
+        </div>
+    </body>
+    </html>
+    """
+    
+    return subject, html_message
+
+def create_daily_distribution_error_email(process_result: Dict[str, Any]) -> tuple:
+    """
+    Create email content for daily distribution errors
+    
+    Args:
+        process_result: Result from failed daily distribution
+    
+    Returns:
+        tuple: (subject, html_message)
+    """
+    error_message = process_result.get('error_message', 'Unknown error')
+    process_stage = process_result.get('process_stage', 'unknown')
+    timestamp = process_result.get('timestamp', datetime.now().isoformat())
+    campaigns_found = process_result.get('campaigns_found', 0)
+    users_found = process_result.get('users_found', 0)
+    users_distributed = process_result.get('users_distributed', 0)
+    
+    subject = f"❌ SoftCollection: Ошибка ежедневной дистрибуции - {process_stage}"
+    
+    html_message = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <title>Ошибка ежедневной дистрибуции</title>
+    </head>
+    <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 800px; margin: 0 auto; padding: 20px;">
+        <div style="background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%); color: white; padding: 30px; border-radius: 10px; margin-bottom: 30px;">
+            <h1 style="margin: 0; font-size: 28px;">
+                ❌ Ошибка ежедневной дистрибуции
+            </h1>
+            <p style="margin: 10px 0 0 0; font-size: 16px; opacity: 0.9;">
+                SoftCollection Автоматическая Система Дистрибуции
+            </p>
+        </div>
+        
+        <div style="background: #fff5f5; border: 1px solid #fed7d7; padding: 25px; border-radius: 8px; margin-bottom: 25px;">
+            <h2 style="color: #c53030; margin-top: 0;">🚨 Детали ошибки</h2>
+            <table style="width: 100%; border-collapse: collapse; background: white; border-radius: 5px; overflow: hidden; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                <tr style="background: #e74c3c; color: white;">
+                    <th style="padding: 12px; text-align: left;">Параметр</th>
+                    <th style="padding: 12px; text-align: left;">Значение</th>
+                </tr>
+                <tr>
+                    <td style="padding: 10px; border-bottom: 1px solid #eee; background: #fff5f5;">
+                        <strong>Время ошибки</strong>
+                    </td>
+                    <td style="padding: 10px; border-bottom: 1px solid #eee; background: #fff5f5;">
+                        {datetime.fromisoformat(timestamp.replace('Z', '+00:00')).strftime('%d.%m.%Y %H:%M:%S')}
+                    </td>
+                </tr>
+                <tr>
+                    <td style="padding: 10px; border-bottom: 1px solid #eee; background: #fff5f5;">
+                        <strong>Стадия процесса</strong>
+                    </td>
+                    <td style="padding: 10px; border-bottom: 1px solid #eee; background: #fff5f5;">
+                        <code style="background: #f7fafc; padding: 4px 8px; border-radius: 4px;">{process_stage}</code>
+                    </td>
+                </tr>
+                <tr>
+                    <td style="padding: 10px; border-bottom: 1px solid #eee; background: #fff5f5;">
+                        <strong>Активных кампаний найдено</strong>
+                    </td>
+                    <td style="padding: 10px; border-bottom: 1px solid #eee; background: #fff5f5;">
+                        {campaigns_found}
+                    </td>
+                </tr>
+                <tr>
+                    <td style="padding: 10px; border-bottom: 1px solid #eee; background: #fff5f5;">
+                        <strong>Пользователей найдено</strong>
+                    </td>
+                    <td style="padding: 10px; border-bottom: 1px solid #eee; background: #fff5f5;">
+                        {users_found:,}
+                    </td>
+                </tr>
+                <tr>
+                    <td style="padding: 10px; background: #fff5f5;">
+                        <strong>Пользователей распределено (частично)</strong>
+                    </td>
+                    <td style="padding: 10px; background: #fff5f5;">
+                        {users_distributed:,}
+                    </td>
+                </tr>
+            </table>
+            
+            <div style="background: #f7fafc; padding: 15px; border-left: 4px solid #e53e3e; margin-top: 15px;">
+                <h4 style="margin-top: 0; color: #c53030;">Сообщение об ошибке:</h4>
+                <p style="margin: 0; font-family: monospace; color: #c53030; word-break: break-word;">
+                    {error_message}
+                </p>
+            </div>
+        </div>
+        
+        <div style="background: #e6fffa; border: 1px solid #81e6d9; padding: 20px; border-radius: 8px; margin-bottom: 25px;">
+            <h3 style="color: #234e52; margin-top: 0;">🔧 Рекомендуемые действия</h3>
+            <ul>
+                <li><strong>Проверить подключения к базам данных:</strong> DSSB_APP и SPSS</li>
+                <li><strong>Проверить доступность таблицы:</strong> SPSS_USER_DRACRM.SC_1_120</li>
+                <li><strong>Проверить логи сервера</strong> для получения дополнительной информации</li>
+                <li><strong>Проверить активные кампании</strong> в системе</li>
+                <li><strong>При необходимости</strong> обратиться к администратору системы</li>
+            </ul>
+        </div>
+        
+        <div style="background: #fff3cd; border: 1px solid #ffeaa7; padding: 15px; border-radius: 5px; margin-bottom: 20px;">
+            <p style="margin: 0; color: #856404;">
+                <strong>🔄 Следующая попытка:</strong> завтра в 09:00 (время Алматы)
+            </p>
+        </div>
+        
+        <div style="text-align: center; padding: 20px; color: #666; font-size: 14px; border-top: 1px solid #eee;">
+            <p>SoftCollection - Автоматическая Система Дистрибуции</p>
+            <p>Автоматическое уведомление об ошибке</p>
+        </div>
+    </body>
+    </html>
+    """
+    
+    return subject, html_message
+
+def send_daily_distribution_success_email(process_result: Dict[str, Any]) -> bool:
+    """Send success notification for daily distribution"""
+    try:
+        subject, message = create_daily_distribution_success_email(process_result)
+        
+        # Create JSON attachment with detailed results
+        json_data = json.dumps(process_result, indent=2, ensure_ascii=False, default=str)
+        attachment = BytesIO(json_data.encode('utf-8'))
+        attachment.name = f"daily_distribution_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        
+        return send_email(CAMPAIGN_NOTIFICATION_EMAILS, subject, message, [attachment])
+    except Exception as e:
+        logger.error(f"Failed to send daily distribution success notification: {str(e)}")
+        return False
+
+def send_daily_distribution_skip_email(process_result: Dict[str, Any]) -> bool:
+    """Send skip notification for daily distribution"""
+    try:
+        subject, message = create_daily_distribution_skip_email(process_result)
+        return send_email(CAMPAIGN_NOTIFICATION_EMAILS, subject, message)
+    except Exception as e:
+        logger.error(f"Failed to send daily distribution skip notification: {str(e)}")
+        return False
+
+def send_daily_distribution_error_email(process_result: Dict[str, Any]) -> bool:
+    """Send error notification for daily distribution"""
+    try:
+        subject, message = create_daily_distribution_error_email(process_result)
+        return send_email(CAMPAIGN_NOTIFICATION_EMAILS, subject, message)
+    except Exception as e:
+        logger.error(f"Failed to send daily distribution error notification: {str(e)}")
+        return False
+
+def send_daily_distribution_critical_error_email(error_msg: str) -> bool:
+    """Send critical error notification for daily distribution"""
+    try:
+        subject = "🚨 SoftCollection: Критическая ошибка ежедневной дистрибуции"
+        
+        html_message = f"""
+        <!DOCTYPE html>
+        <html>
+        <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 800px; margin: 0 auto; padding: 20px;">
+            <div style="background: linear-gradient(135deg, #8e44ad 0%, #9b59b6 100%); color: white; padding: 30px; border-radius: 10px; margin-bottom: 30px;">
+                <h1 style="margin: 0; font-size: 28px;">🚨 Критическая ошибка системы</h1>
+                <p style="margin: 10px 0 0 0; font-size: 16px; opacity: 0.9;">SoftCollection Автоматическая Система Дистрибуции</p>
+            </div>
+            
+            <div style="background: #fff5f5; border: 1px solid #fed7d7; padding: 20px; border-radius: 8px; margin-bottom: 25px;">
+                <h3 style="color: #c53030; margin-top: 0;">⚠️ Требуется немедленное вмешательство</h3>
+                <p><strong>Время:</strong> {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}</p>
+                <div style="background: #f7fafc; padding: 15px; border-left: 4px solid #e53e3e; margin-top: 15px;">
+                    <p style="margin: 0; font-family: monospace; color: #c53030; word-break: break-word;">{error_msg}</p>
+                </div>
+            </div>
+            
+            <div style="background: #ffebee; border: 1px solid #ffcdd2; padding: 20px; border-radius: 8px;">
+                <h3 style="color: #d32f2f; margin-top: 0;">🔧 Немедленные действия</h3>
+                <ul>
+                    <li>Проверить состояние сервера приложений</li>
+                    <li>Проверить подключения к базам данных</li>
+                    <li>Проверить логи системы</li>
+                    <li>Обратиться к системному администратору</li>
+                </ul>
+            </div>
+        </body>
+        </html>
+        """
+        
+        return send_email(CAMPAIGN_NOTIFICATION_EMAILS, subject, html_message)
+    except Exception as e:
+        logger.error(f"Failed to send daily distribution critical error notification: {str(e)}")
+        return False 

@@ -2,6 +2,7 @@ import os
 import cx_Oracle
 from typing import List, Dict, Optional
 from dotenv import load_dotenv
+from datetime import datetime
 
 # Load environment variables
 load_dotenv()
@@ -786,4 +787,360 @@ def get_sc_local_data(table_name, theory_id=None):
             "success": False,
             "data": [],
             "message": f"Failed to get data: {str(e)}"
-        } 
+        }
+
+# Daily Automated Process Functions
+def get_active_campaigns_for_daily_process():
+    """Get active campaigns that should receive new users from daily process"""
+    try:
+        connection = get_connection_DSSB_APP()
+        cursor = connection.cursor()
+        
+        # Get campaigns that are currently active
+        query = """
+        SELECT 
+            theory_id,
+            theory_name,
+            TO_CHAR(theory_start_date, 'YYYY-MM-DD') as theory_start_date,
+            TO_CHAR(theory_end_date, 'YYYY-MM-DD') as theory_end_date,
+            user_count
+        FROM SoftCollection_theories
+        WHERE SYSDATE BETWEEN theory_start_date AND theory_end_date
+        ORDER BY theory_id
+        """
+        
+        cursor.execute(query)
+        columns = [desc[0].lower() for desc in cursor.description]
+        
+        campaigns = []
+        for row in cursor.fetchall():
+            campaigns.append(dict(zip(columns, row)))
+        
+        cursor.close()
+        connection.close()
+        
+        return {
+            "success": True,
+            "campaigns": campaigns,
+            "count": len(campaigns),
+            "message": f"Found {len(campaigns)} active campaigns"
+        }
+        
+    except Exception as e:
+        print(f"Error getting active campaigns for daily process: {e}")
+        return {
+            "success": False,
+            "campaigns": [],
+            "count": 0,
+            "message": f"Failed to get active campaigns: {str(e)}"
+        }
+
+def get_spss_count_day_5_users():
+    """Get users from SPSS_USER_DRACRM.SC_1_120 where COUNT_DAY = 5"""
+    try:
+        connection = get_connection_SPSS()
+        cursor = connection.cursor()
+        
+        # Query for users with COUNT_DAY = 5
+        query = """
+        SELECT IIN
+        FROM SPSS_USER_DRACRM.SC_1_120
+        WHERE COUNT_DAY = 5
+        ORDER BY IIN
+        """
+        
+        cursor.execute(query)
+        
+        # Extract IIN values
+        iin_values = []
+        for row in cursor.fetchall():
+            iin = row[0]
+            if iin and str(iin).strip():
+                iin_values.append(str(iin).strip())
+        
+        cursor.close()
+        connection.close()
+        
+        return {
+            "success": True,
+            "iin_values": list(set(iin_values)),  # Remove duplicates
+            "count": len(set(iin_values)),
+            "message": f"Found {len(set(iin_values))} unique users with COUNT_DAY = 5"
+        }
+        
+    except Exception as e:
+        print(f"Error getting SPSS COUNT_DAY = 5 users: {e}")
+        return {
+            "success": False,
+            "iin_values": [],
+            "count": 0,
+            "message": f"Failed to get SPSS users: {str(e)}"
+        }
+
+def distribute_users_to_campaigns(iin_values, campaigns):
+    """Distribute users equally among active campaigns with group assignments"""
+    try:
+        if not iin_values or not campaigns:
+            return {
+                "success": False,
+                "distributions": [],
+                "message": "No users or campaigns available for distribution"
+            }
+        
+        total_users = len(iin_values)
+        total_campaigns = len(campaigns)
+        
+        # Calculate equal distribution (33, 33, 34 for 3 campaigns)
+        base_count = total_users // total_campaigns
+        remainder = total_users % total_campaigns
+        
+        distributions = []
+        start_idx = 0
+        
+        for i, campaign in enumerate(campaigns):
+            # Last campaigns get the remainder
+            users_for_campaign = base_count + (1 if i >= (total_campaigns - remainder) else 0)
+            end_idx = start_idx + users_for_campaign
+            
+            campaign_users = iin_values[start_idx:end_idx]
+            
+            if campaign_users:
+                # Distribute users equally among groups A, B, C, D, E (5 groups)
+                groups_per_user = 5
+                users_per_group = len(campaign_users) // groups_per_user
+                group_remainder = len(campaign_users) % groups_per_user
+                
+                group_distributions = {}
+                group_start_idx = 0
+                
+                for group_idx, group_letter in enumerate(['A', 'B', 'C', 'D', 'E']):
+                    # Last groups get the remainder
+                    users_for_group = users_per_group + (1 if group_idx >= (groups_per_user - group_remainder) else 0)
+                    group_end_idx = group_start_idx + users_for_group
+                    
+                    group_users = campaign_users[group_start_idx:group_end_idx]
+                    if group_users:
+                        group_distributions[group_letter] = group_users
+                    
+                    group_start_idx = group_end_idx
+                
+                distributions.append({
+                    "campaign": campaign,
+                    "total_users": len(campaign_users),
+                    "groups": group_distributions
+                })
+            
+            start_idx = end_idx
+        
+        return {
+            "success": True,
+            "distributions": distributions,
+            "total_users_distributed": sum(d["total_users"] for d in distributions),
+            "message": f"Distributed {total_users} users among {total_campaigns} campaigns"
+        }
+        
+    except Exception as e:
+        print(f"Error distributing users to campaigns: {e}")
+        return {
+            "success": False,
+            "distributions": [],
+            "message": f"Failed to distribute users: {str(e)}"
+        }
+
+def insert_daily_distributed_users(distributions):
+    """Insert distributed users into appropriate tables (control and target groups)"""
+    try:
+        results = {
+            "total_inserted": 0,
+            "campaign_results": [],
+            "success": True,
+            "messages": []
+        }
+        
+        for distribution in distributions:
+            campaign = distribution["campaign"]
+            theory_id = campaign["theory_id"]
+            date_start = campaign["theory_start_date"]
+            date_end = campaign["theory_end_date"]
+            groups = distribution["groups"]
+            
+            campaign_result = {
+                "theory_id": theory_id,
+                "campaign_name": campaign["theory_name"],
+                "group_results": {},
+                "total_inserted": 0,
+                "success": True
+            }
+            
+            # Process each group
+            for group_letter, group_users in groups.items():
+                if not group_users:
+                    continue
+                
+                try:
+                    if group_letter == 'A':
+                        # Group A goes to control table (SC_local_control)
+                        result = insert_control_group(
+                            theory_id=theory_id,
+                            iin_values=group_users,
+                            date_start=date_start,
+                            date_end=date_end,
+                            additional_fields=None
+                        )
+                        
+                        campaign_result["group_results"][group_letter] = {
+                            "target_table": "SC_local_control",
+                            "users_count": len(group_users),
+                            "inserted_count": result.get("inserted_count", 0),
+                            "success": result.get("success", False),
+                            "message": result.get("message", "")
+                        }
+                        
+                    else:
+                        # Groups B, C, D, E go to target tables (SC_local_target + SPSS)
+                        result = insert_target_groups(
+                            theory_id=theory_id,
+                            iin_values=group_users,
+                            date_start=date_start,
+                            date_end=date_end,
+                            additional_fields=None
+                        )
+                        
+                        campaign_result["group_results"][group_letter] = {
+                            "target_table": "SC_local_target + SPSS",
+                            "users_count": len(group_users),
+                            "inserted_count": result.get("inserted_count", 0),
+                            "success": result.get("success", False),
+                            "message": result.get("message", ""),
+                            "detailed_results": result.get("detailed_results", {})
+                        }
+                    
+                    if result.get("success", False):
+                        campaign_result["total_inserted"] += result.get("inserted_count", 0)
+                    else:
+                        campaign_result["success"] = False
+                        
+                except Exception as e:
+                    print(f"Error inserting group {group_letter} for campaign {theory_id}: {e}")
+                    campaign_result["group_results"][group_letter] = {
+                        "target_table": "SC_local_control" if group_letter == 'A' else "SC_local_target + SPSS",
+                        "users_count": len(group_users),
+                        "inserted_count": 0,
+                        "success": False,
+                        "message": f"Error: {str(e)}"
+                    }
+                    campaign_result["success"] = False
+            
+            results["campaign_results"].append(campaign_result)
+            results["total_inserted"] += campaign_result["total_inserted"]
+            
+            if not campaign_result["success"]:
+                results["success"] = False
+            
+            # Create summary message for this campaign
+            group_summaries = []
+            for group_letter, group_result in campaign_result["group_results"].items():
+                group_summaries.append(f"Group {group_letter}: {group_result['inserted_count']} users")
+            
+            campaign_message = f"Campaign {theory_id} ({campaign['theory_name']}): {', '.join(group_summaries)}"
+            results["messages"].append(campaign_message)
+        
+        return results
+        
+    except Exception as e:
+        print(f"Error inserting daily distributed users: {e}")
+        return {
+            "total_inserted": 0,
+            "campaign_results": [],
+            "success": False,
+            "messages": [f"Error: {str(e)}"]
+        }
+
+def process_daily_user_distribution():
+    """Main function for daily automated user distribution process"""
+    try:
+        # Initialize result structure
+        process_result = {
+            "success": False,
+            "timestamp": datetime.now().isoformat(),
+            "process_stage": "initialization",
+            "campaigns_found": 0,
+            "users_found": 0,
+            "users_distributed": 0,
+            "detailed_results": {},
+            "error_message": None,
+            "skip_reason": None
+        }
+        
+        print(f"[{process_result['timestamp']}] Starting daily user distribution process...")
+        
+        # Step 1: Get active campaigns
+        process_result["process_stage"] = "getting_active_campaigns"
+        campaigns_result = get_active_campaigns_for_daily_process()
+        
+        if not campaigns_result["success"]:
+            process_result["error_message"] = f"Failed to get active campaigns: {campaigns_result['message']}"
+            return process_result
+        
+        if campaigns_result["count"] == 0:
+            process_result["skip_reason"] = "no_active_campaigns"
+            process_result["success"] = True  # Not an error, just nothing to do
+            return process_result
+        
+        process_result["campaigns_found"] = campaigns_result["count"]
+        print(f"Found {campaigns_result['count']} active campaigns")
+        
+        # Step 2: Get users with COUNT_DAY = 5 from SPSS
+        process_result["process_stage"] = "getting_spss_users"
+        spss_users_result = get_spss_count_day_5_users()
+        
+        if not spss_users_result["success"]:
+            process_result["error_message"] = f"Failed to get SPSS users: {spss_users_result['message']}"
+            return process_result
+        
+        if spss_users_result["count"] == 0:
+            process_result["skip_reason"] = "no_count_day_5_users"
+            process_result["success"] = True  # Not an error, just nothing to do
+            return process_result
+        
+        process_result["users_found"] = spss_users_result["count"]
+        print(f"Found {spss_users_result['count']} users with COUNT_DAY = 5")
+        
+        # Step 3: Distribute users among campaigns
+        process_result["process_stage"] = "distributing_users"
+        distribution_result = distribute_users_to_campaigns(
+            spss_users_result["iin_values"],
+            campaigns_result["campaigns"]
+        )
+        
+        if not distribution_result["success"]:
+            process_result["error_message"] = f"Failed to distribute users: {distribution_result['message']}"
+            return process_result
+        
+        print(f"Distribution plan created for {distribution_result['total_users_distributed']} users")
+        
+        # Step 4: Insert distributed users into databases
+        process_result["process_stage"] = "inserting_users"
+        insertion_result = insert_daily_distributed_users(distribution_result["distributions"])
+        
+        process_result["users_distributed"] = insertion_result["total_inserted"]
+        process_result["detailed_results"] = {
+            "campaigns": campaigns_result["campaigns"],
+            "distribution_plan": distribution_result["distributions"],
+            "insertion_results": insertion_result["campaign_results"]
+        }
+        
+        if insertion_result["success"]:
+            process_result["success"] = True
+            process_result["process_stage"] = "completed"
+            print(f"Successfully distributed {insertion_result['total_inserted']} users")
+        else:
+            process_result["error_message"] = f"Insertion failed: {'; '.join(insertion_result['messages'])}"
+            print(f"Insertion partially failed: {insertion_result['total_inserted']} users inserted")
+        
+        return process_result
+        
+    except Exception as e:
+        print(f"Error in daily user distribution process: {e}")
+        process_result["error_message"] = f"Unexpected error: {str(e)}"
+        return process_result 

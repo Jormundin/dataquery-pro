@@ -21,6 +21,10 @@ from database import (
 from query_builder import QueryBuilder
 from auth import authenticate_user, create_access_token, get_current_user, ACCESS_TOKEN_EXPIRE_MINUTES
 from stratification import stratify_data
+from scheduler import (
+    start_daily_scheduler, stop_daily_scheduler, 
+    get_daily_scheduler_status, test_daily_distribution
+)
 
 # Load environment variables
 load_dotenv()
@@ -29,9 +33,24 @@ load_dotenv()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
+    print("🚀 Starting SoftCollection API server...")
+    try:
+        # Start the daily distribution scheduler
+        await start_daily_scheduler()
+        print("✅ Daily distribution scheduler started successfully")
+    except Exception as e:
+        print(f"⚠️ Warning: Failed to start daily scheduler: {e}")
+    
     yield
+    
     # Shutdown
-    pass
+    print("🛑 Shutting down SoftCollection API server...")
+    try:
+        await stop_daily_scheduler()
+        print("✅ Daily distribution scheduler stopped successfully")
+    except Exception as e:
+        print(f"⚠️ Warning: Failed to stop daily scheduler: {e}")
+    print("👋 Goodbye!")
 
 app = FastAPI(
     title="DataQuery Pro API",
@@ -592,9 +611,10 @@ async def stratify_and_create_theories(data: Dict[str, Any], current_user: dict 
                 )
                 
                 if theory_result.get("success"):
-                    # First group (Group A) goes to control, rest go to target
-                    if i == 0 and not control_group_inserted:
-                        # Insert into SC_local_control (first group only)
+                    # Explicit group assignment: First group (Group A) = control, rest = target
+                    if i == 0:
+                        # Group A: Insert into SC_local_control ONLY (no SPSS)
+                        print(f"Processing Group A (control): {group_letter} with {len(iin_values)} users")
                         control_result = insert_control_group(
                             sub_theory_id,
                             iin_values,
@@ -605,7 +625,8 @@ async def stratify_and_create_theories(data: Dict[str, Any], current_user: dict 
                         control_group_inserted = True
                         print(f"Control group result: {control_result}")
                     else:
-                        # Insert each target group separately with its specific sub-ID
+                        # Groups B, C, D, E: Insert into SC_local_target + SPSS.SC_theory_users
+                        print(f"Processing Group {group_letter} (target): {group_letter} with {len(iin_values)} users -> DSSB_APP + SPSS")
                         target_result = insert_target_groups(
                             sub_theory_id,  # Use the specific sub-ID, not base campaign ID
                             iin_values,
@@ -1206,6 +1227,316 @@ async def get_email_config(current_user: dict = Depends(get_current_user_depende
     except Exception as e:
         return {
             "error": f"Error getting email configuration: {str(e)}",
+            "timestamp": datetime.now().isoformat()
+        }
+
+@app.get("/debug/campaign-data-distribution/{base_campaign_id}")
+async def get_campaign_data_distribution(
+    base_campaign_id: str,
+    current_user: dict = Depends(get_current_user_dependency)
+):
+    """Отладка: показать распределение данных кампании по базам данных"""
+    try:
+        from database import execute_query, get_connection_SPSS
+        
+        # Get data from DSSB_APP tables
+        control_query = f"""
+        SELECT THEORY_ID, COUNT(*) as user_count, 'DSSB_APP.SC_local_control' as source_table
+        FROM SC_local_control 
+        WHERE THEORY_ID LIKE '{base_campaign_id}%'
+        GROUP BY THEORY_ID
+        ORDER BY THEORY_ID
+        """
+        
+        target_query = f"""
+        SELECT THEORY_ID, COUNT(*) as user_count, 'DSSB_APP.SC_local_target' as source_table
+        FROM SC_local_target 
+        WHERE THEORY_ID LIKE '{base_campaign_id}%'
+        GROUP BY THEORY_ID
+        ORDER BY THEORY_ID
+        """
+        
+        control_result = execute_query(control_query)
+        target_result = execute_query(target_query)
+        
+        # Get data from SPSS table
+        spss_data = []
+        try:
+            spss_conn = get_connection_SPSS()
+            spss_cursor = spss_conn.cursor()
+            
+            spss_query = f"""
+            SELECT THEORY_ID, COUNT(*) as user_count, 'SPSS.SC_theory_users' as source_table
+            FROM SC_theory_users 
+            WHERE THEORY_ID LIKE '{base_campaign_id}%'
+            GROUP BY THEORY_ID
+            ORDER BY THEORY_ID
+            """
+            
+            spss_cursor.execute(spss_query)
+            columns = [desc[0].lower() for desc in spss_cursor.description]
+            
+            for row in spss_cursor.fetchall():
+                spss_data.append(dict(zip(columns, row)))
+            
+            spss_cursor.close()
+            spss_conn.close()
+            
+        except Exception as spss_error:
+            spss_data = [{"error": f"SPSS connection failed: {str(spss_error)}"}]
+        
+        # Compile results
+        all_data = []
+        
+        if control_result["success"]:
+            all_data.extend(control_result["data"])
+        
+        if target_result["success"]:
+            all_data.extend(target_result["data"])
+        
+        all_data.extend(spss_data)
+        
+        # Create summary
+        summary = {
+            "control_groups": [item for item in all_data if 'control' in item.get('source_table', '')],
+            "target_groups_dssb": [item for item in all_data if 'target' in item.get('source_table', '')],
+            "target_groups_spss": [item for item in all_data if 'spss' in item.get('source_table', '').lower()],
+            "total_users_control": sum(item.get('user_count', 0) for item in all_data if 'control' in item.get('source_table', '')),
+            "total_users_target_dssb": sum(item.get('user_count', 0) for item in all_data if 'target' in item.get('source_table', '')),
+            "total_users_spss": sum(item.get('user_count', 0) for item in all_data if 'spss' in item.get('source_table', '').lower()),
+        }
+        
+        return {
+            "base_campaign_id": base_campaign_id,
+            "data_distribution": all_data,
+            "summary": summary,
+            "expected_behavior": {
+                "control_groups": "Should only appear in DSSB_APP.SC_local_control",
+                "target_groups": "Should appear in both DSSB_APP.SC_local_target AND SPSS.SC_theory_users",
+                "spss_should_not_contain": "Control groups (ending in .1)"
+            },
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+                 return {
+             "error": f"Error getting campaign data distribution: {str(e)}",
+             "timestamp": datetime.now().isoformat()
+         }
+
+@app.post("/debug/cleanup-spss-control-groups")
+async def cleanup_spss_control_groups(current_user: dict = Depends(get_current_user_dependency)):
+    """Отладка: удалить контрольные группы из SPSS.SC_theory_users (они должны быть только в control)"""
+    try:
+        from database import get_connection_SPSS
+        
+        # Check admin permissions for this dangerous operation
+        if 'admin' not in current_user.get('permissions', []):
+            return {
+                "error": "Only admin users can perform SPSS cleanup operations",
+                "timestamp": datetime.now().isoformat()
+            }
+        
+        cleanup_results = {
+            "found_control_groups": [],
+            "deleted_records": 0,
+            "errors": []
+        }
+        
+        try:
+            spss_conn = get_connection_SPSS()
+            spss_cursor = spss_conn.cursor()
+            
+            # First, find control groups in SPSS (they end with .1)
+            find_query = """
+            SELECT THEORY_ID, COUNT(*) as user_count
+            FROM SC_theory_users 
+            WHERE REGEXP_LIKE(THEORY_ID, '^SC[0-9]{8}\.1$')
+            GROUP BY THEORY_ID
+            ORDER BY THEORY_ID
+            """
+            
+            spss_cursor.execute(find_query)
+            for row in spss_cursor.fetchall():
+                theory_id, user_count = row
+                cleanup_results["found_control_groups"].append({
+                    "theory_id": theory_id,
+                    "user_count": user_count
+                })
+            
+            # If control groups found, delete them
+            if cleanup_results["found_control_groups"]:
+                delete_query = """
+                DELETE FROM SC_theory_users 
+                WHERE REGEXP_LIKE(THEORY_ID, '^SC[0-9]{8}\.1$')
+                """
+                
+                spss_cursor.execute(delete_query)
+                cleanup_results["deleted_records"] = spss_cursor.rowcount
+                spss_conn.commit()
+                
+                print(f"Cleaned up {cleanup_results['deleted_records']} control group records from SPSS")
+            
+            spss_cursor.close()
+            spss_conn.close()
+            
+            return {
+                "success": True,
+                "message": f"Cleanup completed. Removed {cleanup_results['deleted_records']} control group records from SPSS.",
+                "details": cleanup_results,
+                "note": "Control groups should only exist in DSSB_APP.SC_local_control, not in SPSS.SC_theory_users",
+                "timestamp": datetime.now().isoformat()
+            }
+            
+        except Exception as spss_error:
+            return {
+                "success": False,
+                "error": f"SPSS cleanup failed: {str(spss_error)}",
+                "timestamp": datetime.now().isoformat()
+            }
+        
+    except Exception as e:
+        return {
+            "error": f"Error during SPSS cleanup: {str(e)}",
+            "timestamp": datetime.now().isoformat()
+        }
+
+# Daily Distribution Scheduler Management Endpoints
+@app.get("/scheduler/status")
+async def get_scheduler_status(current_user: dict = Depends(get_current_user_dependency)):
+    """Получить статус планировщика ежедневной дистрибуции"""
+    try:
+        status = get_daily_scheduler_status()
+        return {
+            "success": True,
+            "scheduler_status": status,
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": f"Error getting scheduler status: {str(e)}",
+            "timestamp": datetime.now().isoformat()
+        }
+
+@app.post("/scheduler/test-distribution")
+async def test_distribution_manually(current_user: dict = Depends(get_current_user_dependency)):
+    """Запустить тестовый запуск ежедневной дистрибуции"""
+    try:
+        # Check admin permissions for manual distribution
+        if 'admin' not in current_user.get('permissions', []):
+            return {
+                "success": False,
+                "error": "Only admin users can run manual distribution tests",
+                "timestamp": datetime.now().isoformat()
+            }
+        
+        result = await test_daily_distribution()
+        
+        return {
+            "success": True,
+            "test_result": result,
+            "message": "Manual distribution test completed",
+            "run_by": current_user["username"],
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        return {
+            "success": False,
+            "error": f"Error running manual distribution test: {str(e)}",
+            "timestamp": datetime.now().isoformat()
+        }
+
+@app.get("/scheduler/next-runs")
+async def get_next_scheduled_runs(current_user: dict = Depends(get_current_user_dependency)):
+    """Получить информацию о следующих запланированных запусках"""
+    try:
+        status = get_daily_scheduler_status()
+        
+        next_runs = []
+        if status.get("status") == "running" and status.get("jobs"):
+            for job in status["jobs"]:
+                if job.get("next_run"):
+                    next_runs.append({
+                        "job_name": job["name"],
+                        "job_id": job["id"],
+                        "next_run": job["next_run"],
+                        "trigger": job["trigger"]
+                    })
+        
+        return {
+            "success": True,
+            "scheduler_running": status.get("status") == "running",
+            "timezone": status.get("timezone", "Asia/Almaty"),
+            "next_runs": next_runs,
+            "total_scheduled_jobs": len(next_runs),
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        return {
+            "success": False,
+            "error": f"Error getting scheduled runs: {str(e)}",
+            "timestamp": datetime.now().isoformat()
+        }
+
+@app.get("/daily-distribution/preview")
+async def preview_daily_distribution(current_user: dict = Depends(get_current_user_dependency)):
+    """Предварительный просмотр данных для ежедневной дистрибуции без выполнения"""
+    try:
+        from database import (
+            get_active_campaigns_for_daily_process,
+            get_spss_count_day_5_users,
+            distribute_users_to_campaigns
+        )
+        
+        # Step 1: Get active campaigns
+        campaigns_result = get_active_campaigns_for_daily_process()
+        if not campaigns_result["success"]:
+            return {
+                "success": False,
+                "error": f"Failed to get active campaigns: {campaigns_result['message']}",
+                "timestamp": datetime.now().isoformat()
+            }
+        
+        # Step 2: Get SPSS users
+        spss_users_result = get_spss_count_day_5_users()
+        if not spss_users_result["success"]:
+            return {
+                "success": False,
+                "error": f"Failed to get SPSS users: {spss_users_result['message']}",
+                "timestamp": datetime.now().isoformat()
+            }
+        
+        # Step 3: Create distribution plan (without executing)
+        distribution_plan = None
+        if campaigns_result["campaigns"] and spss_users_result["iin_values"]:
+            distribution_result = distribute_users_to_campaigns(
+                spss_users_result["iin_values"],
+                campaigns_result["campaigns"]
+            )
+            if distribution_result["success"]:
+                distribution_plan = distribution_result["distributions"]
+        
+        return {
+            "success": True,
+            "preview": {
+                "active_campaigns": campaigns_result["campaigns"],
+                "campaigns_count": campaigns_result["count"],
+                "available_users": spss_users_result["count"],
+                "users_sample": spss_users_result["iin_values"][:5] if spss_users_result["iin_values"] else [],  # Show first 5 as sample
+                "distribution_plan": distribution_plan,
+                "would_distribute": distribution_result["total_users_distributed"] if distribution_plan else 0
+            },
+            "timestamp": datetime.now().isoformat(),
+            "note": "This is a preview only - no data was actually distributed"
+        }
+        
+    except Exception as e:
+        return {
+            "success": False,
+            "error": f"Error creating distribution preview: {str(e)}",
             "timestamp": datetime.now().isoformat()
         }
 

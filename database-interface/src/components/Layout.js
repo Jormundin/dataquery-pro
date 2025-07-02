@@ -20,6 +20,7 @@ const Layout = ({ user, onLogout, children }) => {
     { path: '/data-viewer', label: 'Просмотр данных', icon: Eye },
     { path: '/active-theories', label: 'Активные теории', icon: TestTube },
     { path: '/settings', label: 'Настройки', icon: Settings },
+    { path: '/admin-panel', label: 'Панель администратора', icon: Shield },
   ];
 
   const handleLogout = () => {
