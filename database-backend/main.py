@@ -1348,7 +1348,7 @@ async def cleanup_spss_control_groups(current_user: dict = Depends(get_current_u
             spss_cursor = spss_conn.cursor()
             
             # First, find control groups in SPSS (they end with .1)
-            find_query = """
+            find_query = r"""
             SELECT THEORY_ID, COUNT(*) as user_count
             FROM SC_theory_users 
             WHERE REGEXP_LIKE(THEORY_ID, '^SC[0-9]{8}\.1$')
@@ -1366,7 +1366,7 @@ async def cleanup_spss_control_groups(current_user: dict = Depends(get_current_u
             
             # If control groups found, delete them
             if cleanup_results["found_control_groups"]:
-                delete_query = """
+                delete_query = r"""
                 DELETE FROM SC_theory_users 
                 WHERE REGEXP_LIKE(THEORY_ID, '^SC[0-9]{8}\.1$')
                 """
@@ -1537,6 +1537,463 @@ async def preview_daily_distribution(current_user: dict = Depends(get_current_us
         return {
             "success": False,
             "error": f"Error creating distribution preview: {str(e)}",
+            "timestamp": datetime.now().isoformat()
+        }
+
+@app.get("/monitoring/overview")
+async def get_monitoring_overview(current_user: dict = Depends(get_current_user_dependency)):
+    """Get high-level monitoring overview of all tables and activities"""
+    try:
+        from database import execute_query, get_connection_SPSS
+        
+        overview = {
+            "timestamp": datetime.now().isoformat(),
+            "tables": {},
+            "campaigns": {},
+            "daily_activity": {},
+            "recent_uploads": []
+        }
+        
+        # Get SC_local_control statistics
+        control_stats_query = """
+        SELECT 
+            COUNT(*) as total_users,
+            COUNT(DISTINCT THEORY_ID) as unique_campaigns,
+            MIN(insert_datetime) as earliest_upload,
+            MAX(insert_datetime) as latest_upload
+        FROM SC_local_control
+        """
+        control_result = execute_query(control_stats_query)
+        if control_result["success"] and control_result["data"]:
+            overview["tables"]["sc_local_control"] = control_result["data"][0]
+        
+        # Get SC_local_target statistics
+        target_stats_query = """
+        SELECT 
+            COUNT(*) as total_users,
+            COUNT(DISTINCT THEORY_ID) as unique_campaigns,
+            MIN(insert_datetime) as earliest_upload,
+            MAX(insert_datetime) as latest_upload
+        FROM SC_local_target
+        """
+        target_result = execute_query(target_stats_query)
+        if target_result["success"] and target_result["data"]:
+            overview["tables"]["sc_local_target"] = target_result["data"][0]
+        
+        # Get SPSS statistics
+        try:
+            spss_conn = get_connection_SPSS()
+            spss_cursor = spss_conn.cursor()
+            
+            spss_stats_query = """
+            SELECT 
+                COUNT(*) as total_users,
+                COUNT(DISTINCT THEORY_ID) as unique_campaigns,
+                MIN(insert_datetime) as earliest_upload,
+                MAX(insert_datetime) as latest_upload
+            FROM SC_theory_users
+            """
+            spss_cursor.execute(spss_stats_query)
+            columns = [desc[0].lower() for desc in spss_cursor.description]
+            row = spss_cursor.fetchone()
+            if row:
+                overview["tables"]["spss_sc_theory_users"] = dict(zip(columns, row))
+            
+            spss_cursor.close()
+            spss_conn.close()
+            
+        except Exception as spss_error:
+            overview["tables"]["spss_sc_theory_users"] = {"error": str(spss_error)}
+        
+        # Get campaign registry statistics
+        campaign_stats_query = """
+        SELECT 
+            COUNT(*) as total_campaigns,
+            COUNT(CASE WHEN SYSDATE BETWEEN theory_start_date AND theory_end_date THEN 1 END) as active_campaigns,
+            SUM(user_count) as total_planned_users,
+            MIN(load_date) as earliest_campaign,
+            MAX(load_date) as latest_campaign
+        FROM SoftCollection_theories
+        """
+        campaign_result = execute_query(campaign_stats_query)
+        if campaign_result["success"] and campaign_result["data"]:
+            overview["campaigns"] = campaign_result["data"][0]
+        
+        return {
+            "success": True,
+            "overview": overview
+        }
+        
+    except Exception as e:
+        return {
+            "success": False,
+            "error": f"Error getting monitoring overview: {str(e)}",
+            "timestamp": datetime.now().isoformat()
+        }
+
+@app.get("/monitoring/daily-statistics")
+async def get_daily_statistics(
+    days_back: int = Query(7, ge=1, le=30, description="Number of days to look back"),
+    current_user: dict = Depends(get_current_user_dependency)
+):
+    """Get daily upload statistics for the last N days"""
+    try:
+        from database import execute_query, get_connection_SPSS
+        
+        daily_stats = {
+            "period": f"Last {days_back} days",
+            "timestamp": datetime.now().isoformat(),
+            "sc_local_control": [],
+            "sc_local_target": [],
+            "spss_sc_theory_users": [],
+            "summary": {}
+        }
+        
+        # SC_local_control daily statistics
+        control_daily_query = f"""
+        SELECT 
+            TO_CHAR(insert_datetime, 'YYYY-MM-DD') as upload_date,
+            COUNT(*) as users_uploaded,
+            COUNT(DISTINCT THEORY_ID) as campaigns_affected,
+            COUNT(DISTINCT IIN) as unique_users
+        FROM SC_local_control
+        WHERE insert_datetime >= SYSDATE - {days_back}
+        GROUP BY TO_CHAR(insert_datetime, 'YYYY-MM-DD')
+        ORDER BY upload_date DESC
+        """
+        control_result = execute_query(control_daily_query)
+        if control_result["success"]:
+            daily_stats["sc_local_control"] = control_result["data"]
+        
+        # SC_local_target daily statistics
+        target_daily_query = f"""
+        SELECT 
+            TO_CHAR(insert_datetime, 'YYYY-MM-DD') as upload_date,
+            COUNT(*) as users_uploaded,
+            COUNT(DISTINCT THEORY_ID) as campaigns_affected,
+            COUNT(DISTINCT IIN) as unique_users
+        FROM SC_local_target
+        WHERE insert_datetime >= SYSDATE - {days_back}
+        GROUP BY TO_CHAR(insert_datetime, 'YYYY-MM-DD')
+        ORDER BY upload_date DESC
+        """
+        target_result = execute_query(target_daily_query)
+        if target_result["success"]:
+            daily_stats["sc_local_target"] = target_result["data"]
+        
+        # SPSS daily statistics
+        try:
+            spss_conn = get_connection_SPSS()
+            spss_cursor = spss_conn.cursor()
+            
+            spss_daily_query = f"""
+            SELECT 
+                TO_CHAR(insert_datetime, 'YYYY-MM-DD') as upload_date,
+                COUNT(*) as users_uploaded,
+                COUNT(DISTINCT THEORY_ID) as campaigns_affected,
+                COUNT(DISTINCT IIN) as unique_users
+            FROM SC_theory_users
+            WHERE insert_datetime >= SYSDATE - {days_back}
+            GROUP BY TO_CHAR(insert_datetime, 'YYYY-MM-DD')
+            ORDER BY upload_date DESC
+            """
+            spss_cursor.execute(spss_daily_query)
+            columns = [desc[0].lower() for desc in spss_cursor.description]
+            
+            spss_daily_data = []
+            for row in spss_cursor.fetchall():
+                spss_daily_data.append(dict(zip(columns, row)))
+            daily_stats["spss_sc_theory_users"] = spss_daily_data
+            
+            spss_cursor.close()
+            spss_conn.close()
+            
+        except Exception as spss_error:
+            daily_stats["spss_sc_theory_users"] = [{"error": str(spss_error)}]
+        
+        # Calculate summary statistics
+        total_control = sum(day.get("users_uploaded", 0) for day in daily_stats["sc_local_control"])
+        total_target = sum(day.get("users_uploaded", 0) for day in daily_stats["sc_local_target"])
+        total_spss = sum(day.get("users_uploaded", 0) for day in daily_stats["spss_sc_theory_users"] if "error" not in day)
+        
+        daily_stats["summary"] = {
+            "total_control_uploads": total_control,
+            "total_target_uploads": total_target,
+            "total_spss_uploads": total_spss,
+            "total_uploads": total_control + total_target + total_spss
+        }
+        
+        return {
+            "success": True,
+            "daily_statistics": daily_stats
+        }
+        
+    except Exception as e:
+        return {
+            "success": False,
+            "error": f"Error getting daily statistics: {str(e)}",
+            "timestamp": datetime.now().isoformat()
+        }
+
+@app.get("/monitoring/campaign-distribution")
+async def get_campaign_distribution(current_user: dict = Depends(get_current_user_dependency)):
+    """Get user distribution by campaigns across all tables"""
+    try:
+        from database import execute_query, get_connection_SPSS
+        
+        distribution = {
+            "timestamp": datetime.now().isoformat(),
+            "campaigns": [],
+            "totals": {}
+        }
+        
+        # Get campaign distribution from all tables
+        campaign_dist_query = r"""
+        WITH campaign_summary AS (
+            SELECT 
+                st.theory_id,
+                st.theory_name,
+                TO_CHAR(st.theory_start_date, 'YYYY-MM-DD') as theory_start_date,
+                TO_CHAR(st.theory_end_date, 'YYYY-MM-DD') as theory_end_date,
+                st.user_count as planned_users,
+                CASE WHEN SYSDATE BETWEEN st.theory_start_date AND st.theory_end_date THEN 'Active' ELSE 'Inactive' END as status
+            FROM SoftCollection_theories st
+        ),
+        control_counts AS (
+            SELECT 
+                CASE 
+                    WHEN REGEXP_LIKE(theory_id, '^SC[0-9]{8}\.[0-9]+$') THEN
+                        SUBSTR(theory_id, 1, INSTR(theory_id, '.') - 1)
+                    ELSE theory_id
+                END as base_campaign_id,
+                COUNT(*) as control_users
+            FROM SC_local_control
+            GROUP BY CASE 
+                WHEN REGEXP_LIKE(theory_id, '^SC[0-9]{8}\.[0-9]+$') THEN
+                    SUBSTR(theory_id, 1, INSTR(theory_id, '.') - 1)
+                ELSE theory_id
+            END
+        ),
+        target_counts AS (
+            SELECT 
+                CASE 
+                    WHEN REGEXP_LIKE(theory_id, '^SC[0-9]{8}\.[0-9]+$') THEN
+                        SUBSTR(theory_id, 1, INSTR(theory_id, '.') - 1)
+                    ELSE theory_id
+                END as base_campaign_id,
+                COUNT(*) as target_users
+            FROM SC_local_target
+            GROUP BY CASE 
+                WHEN REGEXP_LIKE(theory_id, '^SC[0-9]{8}\.[0-9]+$') THEN
+                    SUBSTR(theory_id, 1, INSTR(theory_id, '.') - 1)
+                ELSE theory_id
+            END
+        )
+        SELECT 
+            cs.theory_id,
+            cs.theory_name,
+            cs.theory_start_date,
+            cs.theory_end_date,
+            cs.planned_users,
+            cs.status,
+            NVL(cc.control_users, 0) as control_users,
+            NVL(tc.target_users, 0) as target_users,
+            (NVL(cc.control_users, 0) + NVL(tc.target_users, 0)) as total_actual_users
+        FROM campaign_summary cs
+        LEFT JOIN control_counts cc ON (
+            CASE 
+                WHEN REGEXP_LIKE(cs.theory_id, '^SC[0-9]{8}\.[0-9]+$') THEN
+                    SUBSTR(cs.theory_id, 1, INSTR(cs.theory_id, '.') - 1)
+                ELSE cs.theory_id
+            END = cc.base_campaign_id
+        )
+        LEFT JOIN target_counts tc ON (
+            CASE 
+                WHEN REGEXP_LIKE(cs.theory_id, '^SC[0-9]{8}\.[0-9]+$') THEN
+                    SUBSTR(cs.theory_id, 1, INSTR(cs.theory_id, '.') - 1)
+                ELSE cs.theory_id
+            END = tc.base_campaign_id
+        )
+        ORDER BY cs.theory_start_date DESC, cs.theory_id DESC
+        """
+        
+        campaign_result = execute_query(campaign_dist_query)
+        if campaign_result["success"]:
+            distribution["campaigns"] = campaign_result["data"]
+        
+        # Get SPSS counts for each campaign
+        try:
+            spss_conn = get_connection_SPSS()
+            spss_cursor = spss_conn.cursor()
+            
+            spss_dist_query = r"""
+            SELECT 
+                CASE 
+                    WHEN REGEXP_LIKE(theory_id, '^SC[0-9]{8}\.[0-9]+$') THEN
+                        SUBSTR(theory_id, 1, INSTR(theory_id, '.') - 1)
+                    ELSE theory_id
+                END as base_campaign_id,
+                COUNT(*) as spss_users
+            FROM SC_theory_users
+            GROUP BY CASE 
+                WHEN REGEXP_LIKE(theory_id, '^SC[0-9]{8}\.[0-9]+$') THEN
+                    SUBSTR(theory_id, 1, INSTR(theory_id, '.') - 1)
+                ELSE theory_id
+            END
+            """
+            spss_cursor.execute(spss_dist_query)
+            
+            spss_counts = {}
+            for row in spss_cursor.fetchall():
+                base_id, count = row
+                spss_counts[base_id] = count
+            
+            # Add SPSS counts to campaigns
+            for campaign in distribution["campaigns"]:
+                base_id = campaign["theory_id"]
+                if "." in base_id:
+                    base_id = base_id.split(".")[0]
+                campaign["spss_users"] = spss_counts.get(base_id, 0)
+            
+            spss_cursor.close()
+            spss_conn.close()
+            
+        except Exception as spss_error:
+            for campaign in distribution["campaigns"]:
+                campaign["spss_users"] = f"Error: {spss_error}"
+        
+        # Calculate totals
+        distribution["totals"] = {
+            "total_campaigns": len(distribution["campaigns"]),
+            "active_campaigns": len([c for c in distribution["campaigns"] if c["status"] == "Active"]),
+            "total_control_users": sum(c.get("control_users", 0) for c in distribution["campaigns"]),
+            "total_target_users": sum(c.get("target_users", 0) for c in distribution["campaigns"]),
+            "total_planned_users": sum(c.get("planned_users", 0) for c in distribution["campaigns"]),
+            "total_actual_users": sum(c.get("total_actual_users", 0) for c in distribution["campaigns"])
+        }
+        
+        return {
+            "success": True,
+            "campaign_distribution": distribution
+        }
+        
+    except Exception as e:
+        return {
+            "success": False,
+            "error": f"Error getting campaign distribution: {str(e)}",
+            "timestamp": datetime.now().isoformat()
+        }
+
+@app.get("/monitoring/recent-activity")
+async def get_recent_activity(
+    limit: int = Query(50, ge=10, le=200, description="Number of recent records to fetch"),
+    current_user: dict = Depends(get_current_user_dependency)
+):
+    """Get recent upload activity across all tables"""
+    try:
+        from database import execute_query, get_connection_SPSS
+        
+        recent_activity = {
+            "timestamp": datetime.now().isoformat(),
+            "activities": [],
+            "summary": {}
+        }
+        
+        # Get recent activities from SC_local_control
+        control_activity_query = f"""
+        SELECT 
+            'SC_local_control' as table_name,
+            'Control Group' as activity_type,
+            THEORY_ID,
+            COUNT(*) as users_count,
+            TO_CHAR(insert_datetime, 'YYYY-MM-DD HH24:MI:SS') as upload_time,
+            tab1, tab2
+        FROM SC_local_control
+        WHERE insert_datetime >= SYSDATE - 7
+        GROUP BY THEORY_ID, TO_CHAR(insert_datetime, 'YYYY-MM-DD HH24:MI:SS'), tab1, tab2
+        ORDER BY insert_datetime DESC
+        FETCH FIRST {limit//3} ROWS ONLY
+        """
+        control_result = execute_query(control_activity_query)
+        if control_result["success"]:
+            recent_activity["activities"].extend(control_result["data"])
+        
+        # Get recent activities from SC_local_target
+        target_activity_query = f"""
+        SELECT 
+            'SC_local_target' as table_name,
+            'Target Group' as activity_type,
+            THEORY_ID,
+            COUNT(*) as users_count,
+            TO_CHAR(insert_datetime, 'YYYY-MM-DD HH24:MI:SS') as upload_time,
+            tab1, tab2
+        FROM SC_local_target
+        WHERE insert_datetime >= SYSDATE - 7
+        GROUP BY THEORY_ID, TO_CHAR(insert_datetime, 'YYYY-MM-DD HH24:MI:SS'), tab1, tab2
+        ORDER BY insert_datetime DESC
+        FETCH FIRST {limit//3} ROWS ONLY
+        """
+        target_result = execute_query(target_activity_query)
+        if target_result["success"]:
+            recent_activity["activities"].extend(target_result["data"])
+        
+        # Get recent activities from SPSS
+        try:
+            spss_conn = get_connection_SPSS()
+            spss_cursor = spss_conn.cursor()
+            
+            spss_activity_query = f"""
+            SELECT 
+                'SPSS_SC_theory_users' as table_name,
+                'SPSS Target' as activity_type,
+                THEORY_ID,
+                COUNT(*) as users_count,
+                TO_CHAR(insert_datetime, 'YYYY-MM-DD HH24:MI:SS') as upload_time,
+                tab1, tab2
+            FROM SC_theory_users
+            WHERE insert_datetime >= SYSDATE - 7
+            GROUP BY THEORY_ID, TO_CHAR(insert_datetime, 'YYYY-MM-DD HH24:MI:SS'), tab1, tab2
+            ORDER BY insert_datetime DESC
+            FETCH FIRST {limit//3} ROWS ONLY
+            """
+            spss_cursor.execute(spss_activity_query)
+            columns = [desc[0].lower() for desc in spss_cursor.description]
+            
+            for row in spss_cursor.fetchall():
+                recent_activity["activities"].append(dict(zip(columns, row)))
+            
+            spss_cursor.close()
+            spss_conn.close()
+            
+        except Exception as spss_error:
+            recent_activity["activities"].append({
+                "table_name": "SPSS_SC_theory_users",
+                "activity_type": "Error",
+                "error": str(spss_error)
+            })
+        
+        # Sort all activities by upload_time
+        valid_activities = [a for a in recent_activity["activities"] if "upload_time" in a]
+        valid_activities.sort(key=lambda x: x["upload_time"], reverse=True)
+        recent_activity["activities"] = valid_activities[:limit]
+        
+        # Calculate summary
+        recent_activity["summary"] = {
+            "total_activities": len(valid_activities),
+            "unique_campaigns": len(set(a.get("theory_id", "") for a in valid_activities if a.get("theory_id"))),
+            "total_users_uploaded": sum(a.get("users_count", 0) for a in valid_activities),
+            "period": "Last 7 days"
+        }
+        
+        return {
+            "success": True,
+            "recent_activity": recent_activity
+        }
+        
+    except Exception as e:
+        return {
+            "success": False,
+            "error": f"Error getting recent activity: {str(e)}",
             "timestamp": datetime.now().isoformat()
         }
 

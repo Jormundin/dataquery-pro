@@ -276,7 +276,7 @@ def get_next_sc_campaign_id():
         cursor = connection.cursor()
         
         # Find the highest SC campaign number
-        cursor.execute("""
+        cursor.execute(r"""
         SELECT NVL(MAX(
             CASE 
                 WHEN REGEXP_LIKE(theory_id, '^SC[0-9]{8}\.[0-9]+$') THEN 
@@ -309,7 +309,7 @@ def get_next_theory_id():
         # Since theory_id is now VARCHAR2, we need to find the highest numeric base ID
         # This handles both old numeric IDs (1, 2, 3) and new decimal IDs (4.1, 4.2, 4.3)
         # but excludes SC format IDs
-        cursor.execute("""
+        cursor.execute(r"""
         SELECT NVL(MAX(
             CASE 
                 WHEN REGEXP_LIKE(theory_id, '^[0-9]+(\.[0-9]+)?$') THEN
@@ -444,7 +444,7 @@ def get_active_theories():
         cursor = connection.cursor()
         
         # Get all campaign records - much simpler now with one record per campaign
-        query = """
+        query = r"""
         SELECT 
             theory_id,
             theory_name,
@@ -877,8 +877,80 @@ def get_spss_count_day_5_users():
             "message": f"Failed to get SPSS users: {str(e)}"
         }
 
+def get_existing_campaign_groups(base_campaign_id):
+    """Get existing groups for a campaign and their tab field values"""
+    try:
+        connection = get_connection_DSSB_APP()
+        cursor = connection.cursor()
+        
+        # Find existing groups in both control and target tables
+        existing_groups = {}
+        
+        # Check control table
+        control_query = r"""
+        SELECT DISTINCT THEORY_ID, tab1, tab2, tab3, tab4, tab5
+        FROM SC_local_control 
+        WHERE THEORY_ID LIKE :1
+        """
+        cursor.execute(control_query, (f"{base_campaign_id}%",))
+        
+        for row in cursor.fetchall():
+            theory_id, tab1, tab2, tab3, tab4, tab5 = row
+            existing_groups[theory_id] = {
+                "table": "SC_local_control",
+                "group_type": "control",
+                "tab_values": {
+                    "tab1": tab1,
+                    "tab2": tab2, 
+                    "tab3": tab3,
+                    "tab4": tab4,
+                    "tab5": tab5
+                }
+            }
+        
+        # Check target table  
+        target_query = r"""
+        SELECT DISTINCT THEORY_ID, tab1, tab2, tab3, tab4, tab5
+        FROM SC_local_target 
+        WHERE THEORY_ID LIKE :1
+        """
+        cursor.execute(target_query, (f"{base_campaign_id}%",))
+        
+        for row in cursor.fetchall():
+            theory_id, tab1, tab2, tab3, tab4, tab5 = row
+            existing_groups[theory_id] = {
+                "table": "SC_local_target", 
+                "group_type": "target",
+                "tab_values": {
+                    "tab1": tab1,
+                    "tab2": tab2,
+                    "tab3": tab3, 
+                    "tab4": tab4,
+                    "tab5": tab5
+                }
+            }
+        
+        cursor.close()
+        connection.close()
+        
+        return {
+            "success": True,
+            "groups": existing_groups,
+            "count": len(existing_groups),
+            "message": f"Found {len(existing_groups)} existing groups for campaign {base_campaign_id}"
+        }
+        
+    except Exception as e:
+        print(f"Error getting existing campaign groups: {e}")
+        return {
+            "success": False,
+            "groups": {},
+            "count": 0,
+            "message": f"Failed to get existing groups: {str(e)}"
+        }
+
 def distribute_users_to_campaigns(iin_values, campaigns):
-    """Distribute users equally among active campaigns with group assignments"""
+    """Distribute users equally among active campaigns into their EXISTING groups"""
     try:
         if not iin_values or not campaigns:
             return {
@@ -890,7 +962,7 @@ def distribute_users_to_campaigns(iin_values, campaigns):
         total_users = len(iin_values)
         total_campaigns = len(campaigns)
         
-        # Calculate equal distribution (33, 33, 34 for 3 campaigns)
+        # Calculate equal distribution among campaigns
         base_count = total_users // total_campaigns
         remainder = total_users % total_campaigns
         
@@ -905,28 +977,55 @@ def distribute_users_to_campaigns(iin_values, campaigns):
             campaign_users = iin_values[start_idx:end_idx]
             
             if campaign_users:
-                # Distribute users equally among groups A, B, C, D, E (5 groups)
-                groups_per_user = 5
-                users_per_group = len(campaign_users) // groups_per_user
-                group_remainder = len(campaign_users) % groups_per_user
+                # Extract base campaign ID (e.g., "SC00000001" from "SC00000001.1")
+                base_campaign_id = campaign["theory_id"]
+                if "." in base_campaign_id:
+                    base_campaign_id = base_campaign_id.split(".")[0]
+                
+                # Get existing groups for this campaign
+                existing_groups_result = get_existing_campaign_groups(base_campaign_id)
+                
+                if not existing_groups_result["success"] or not existing_groups_result["groups"]:
+                    print(f"No existing groups found for campaign {base_campaign_id}, skipping...")
+                    start_idx = end_idx
+                    continue
+                
+                existing_groups = existing_groups_result["groups"]
+                group_count = len(existing_groups)
+                
+                # Distribute users among existing groups
+                users_per_group = len(campaign_users) // group_count
+                group_remainder = len(campaign_users) % group_count
                 
                 group_distributions = {}
                 group_start_idx = 0
                 
-                for group_idx, group_letter in enumerate(['A', 'B', 'C', 'D', 'E']):
+                for group_idx, (theory_id, group_info) in enumerate(existing_groups.items()):
                     # Last groups get the remainder
-                    users_for_group = users_per_group + (1 if group_idx >= (groups_per_user - group_remainder) else 0)
+                    users_for_group = users_per_group + (1 if group_idx >= (group_count - group_remainder) else 0)
                     group_end_idx = group_start_idx + users_for_group
                     
                     group_users = campaign_users[group_start_idx:group_end_idx]
                     if group_users:
-                        group_distributions[group_letter] = group_users
+                        # Extract group letter from theory ID (e.g., "A" from ".1", "B" from ".2", etc.)
+                        suffix = theory_id.split(".")[-1] if "." in theory_id else "1"
+                        group_letter = chr(ord('A') + int(suffix) - 1)  # 1->A, 2->B, 3->C, etc.
+                        
+                        group_distributions[group_letter] = {
+                            "users": group_users,
+                            "theory_id": theory_id,
+                            "group_type": group_info["group_type"],
+                            "target_table": group_info["table"],
+                            "tab_values": group_info["tab_values"]
+                        }
                     
                     group_start_idx = group_end_idx
                 
                 distributions.append({
                     "campaign": campaign,
+                    "base_campaign_id": base_campaign_id,
                     "total_users": len(campaign_users),
+                    "existing_groups_count": group_count,
                     "groups": group_distributions
                 })
             
@@ -936,7 +1035,7 @@ def distribute_users_to_campaigns(iin_values, campaigns):
             "success": True,
             "distributions": distributions,
             "total_users_distributed": sum(d["total_users"] for d in distributions),
-            "message": f"Distributed {total_users} users among {total_campaigns} campaigns"
+            "message": f"Distributed {total_users} users among {total_campaigns} campaigns into existing groups"
         }
         
     except Exception as e:
@@ -948,7 +1047,7 @@ def distribute_users_to_campaigns(iin_values, campaigns):
         }
 
 def insert_daily_distributed_users(distributions):
-    """Insert distributed users into appropriate tables (control and target groups)"""
+    """Insert distributed users into existing groups with their original tab values"""
     try:
         results = {
             "total_inserted": 0,
@@ -959,13 +1058,13 @@ def insert_daily_distributed_users(distributions):
         
         for distribution in distributions:
             campaign = distribution["campaign"]
-            theory_id = campaign["theory_id"]
+            base_campaign_id = distribution["base_campaign_id"]
             date_start = campaign["theory_start_date"]
             date_end = campaign["theory_end_date"]
             groups = distribution["groups"]
             
             campaign_result = {
-                "theory_id": theory_id,
+                "base_campaign_id": base_campaign_id,
                 "campaign_name": campaign["theory_name"],
                 "group_results": {},
                 "total_inserted": 0,
@@ -973,46 +1072,56 @@ def insert_daily_distributed_users(distributions):
             }
             
             # Process each group
-            for group_letter, group_users in groups.items():
-                if not group_users:
+            for group_letter, group_data in groups.items():
+                if not group_data.get("users"):
                     continue
                 
+                group_users = group_data["users"]
+                group_theory_id = group_data["theory_id"]
+                group_type = group_data["group_type"]
+                target_table = group_data["target_table"]
+                existing_tab_values = group_data["tab_values"]
+                
                 try:
-                    if group_letter == 'A':
-                        # Group A goes to control table (SC_local_control)
+                    if group_type == "control":
+                        # Insert into control table using existing tab values
                         result = insert_control_group(
-                            theory_id=theory_id,
+                            theory_id=group_theory_id,
                             iin_values=group_users,
                             date_start=date_start,
                             date_end=date_end,
-                            additional_fields=None
+                            additional_fields=existing_tab_values
                         )
                         
                         campaign_result["group_results"][group_letter] = {
+                            "theory_id": group_theory_id,
                             "target_table": "SC_local_control",
                             "users_count": len(group_users),
                             "inserted_count": result.get("inserted_count", 0),
                             "success": result.get("success", False),
-                            "message": result.get("message", "")
+                            "message": result.get("message", ""),
+                            "existing_tab_values": existing_tab_values
                         }
                         
-                    else:
-                        # Groups B, C, D, E go to target tables (SC_local_target + SPSS)
+                    else:  # target group
+                        # Insert into target table + SPSS using existing tab values
                         result = insert_target_groups(
-                            theory_id=theory_id,
+                            theory_id=group_theory_id,
                             iin_values=group_users,
                             date_start=date_start,
                             date_end=date_end,
-                            additional_fields=None
+                            additional_fields=existing_tab_values
                         )
                         
                         campaign_result["group_results"][group_letter] = {
+                            "theory_id": group_theory_id,
                             "target_table": "SC_local_target + SPSS",
                             "users_count": len(group_users),
                             "inserted_count": result.get("inserted_count", 0),
                             "success": result.get("success", False),
                             "message": result.get("message", ""),
-                            "detailed_results": result.get("detailed_results", {})
+                            "detailed_results": result.get("detailed_results", {}),
+                            "existing_tab_values": existing_tab_values
                         }
                     
                     if result.get("success", False):
@@ -1021,13 +1130,15 @@ def insert_daily_distributed_users(distributions):
                         campaign_result["success"] = False
                         
                 except Exception as e:
-                    print(f"Error inserting group {group_letter} for campaign {theory_id}: {e}")
+                    print(f"Error inserting group {group_letter} for campaign {base_campaign_id}: {e}")
                     campaign_result["group_results"][group_letter] = {
-                        "target_table": "SC_local_control" if group_letter == 'A' else "SC_local_target + SPSS",
+                        "theory_id": group_theory_id,
+                        "target_table": target_table,
                         "users_count": len(group_users),
                         "inserted_count": 0,
                         "success": False,
-                        "message": f"Error: {str(e)}"
+                        "message": f"Error: {str(e)}",
+                        "existing_tab_values": existing_tab_values
                     }
                     campaign_result["success"] = False
             
@@ -1040,9 +1151,13 @@ def insert_daily_distributed_users(distributions):
             # Create summary message for this campaign
             group_summaries = []
             for group_letter, group_result in campaign_result["group_results"].items():
-                group_summaries.append(f"Group {group_letter}: {group_result['inserted_count']} users")
+                theory_id = group_result["theory_id"]
+                count = group_result["inserted_count"]
+                target = group_result["target_table"]
+                tab1_value = group_result["existing_tab_values"].get("tab1", "NULL")
+                group_summaries.append(f"Group {group_letter} ({theory_id}): {count} users → {target} [tab1: {tab1_value}]")
             
-            campaign_message = f"Campaign {theory_id} ({campaign['theory_name']}): {', '.join(group_summaries)}"
+            campaign_message = f"Campaign {base_campaign_id} ({campaign['theory_name']}): {', '.join(group_summaries)}"
             results["messages"].append(campaign_message)
         
         return results

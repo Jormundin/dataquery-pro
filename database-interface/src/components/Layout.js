@@ -8,7 +8,8 @@ import {
   User, 
   LogOut,
   Shield,
-  TestTube
+  TestTube,
+  Activity
 } from 'lucide-react';
 
 const Layout = ({ user, onLogout, children }) => {
@@ -19,6 +20,7 @@ const Layout = ({ user, onLogout, children }) => {
     { path: '/query-builder', label: 'Конструктор запросов', icon: Database },
     { path: '/data-viewer', label: 'Просмотр данных', icon: Eye },
     { path: '/active-theories', label: 'Активные теории', icon: TestTube },
+    { path: '/monitoring', label: 'Мониторинг системы', icon: Activity },
     { path: '/settings', label: 'Настройки', icon: Settings },
     { path: '/admin-panel', label: 'Панель администратора', icon: Shield },
   ];

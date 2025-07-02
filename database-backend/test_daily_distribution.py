@@ -94,7 +94,7 @@ def test_distribution_logic():
     # Create mock data for testing
     mock_campaigns = [
         {
-            "theory_id": "SC00000001.1",
+            "theory_id": "SC00000001.1",  # This represents an active campaign base ID
             "theory_name": "Test Campaign 1",
             "theory_start_date": "2024-01-01",
             "theory_end_date": "2024-12-31",
@@ -106,13 +106,6 @@ def test_distribution_logic():
             "theory_start_date": "2024-01-01",
             "theory_end_date": "2024-12-31",
             "user_count": 1500
-        },
-        {
-            "theory_id": "SC00000003.1",
-            "theory_name": "Test Campaign 3", 
-            "theory_start_date": "2024-01-01",
-            "theory_end_date": "2024-12-31",
-            "user_count": 800
         }
     ]
     
@@ -120,22 +113,45 @@ def test_distribution_logic():
     mock_iins = [f"12345678{i:02d}" for i in range(100)]
     
     try:
+        print(f"📊 Mock Test Setup:")
+        print(f"  Note: This is a mock test - real distribution finds existing groups from database")
+        print(f"  Total users to distribute: {len(mock_iins)}")
+        print(f"  Total campaigns: {len(mock_campaigns)}")
+        
+        # In real implementation, this would:
+        # 1. Extract base campaign IDs (SC00000001, SC00000002)
+        # 2. Query database for existing groups (SC00000001.1, SC00000001.2, SC00000001.3, etc.)
+        # 3. Get existing tab1-tab5 values from those groups
+        # 4. Distribute users among those existing groups
+        
         result = distribute_users_to_campaigns(mock_iins, mock_campaigns)
         
         if result["success"]:
             print(f"✅ Distribution successful:")
-            print(f"  Total users to distribute: {len(mock_iins)}")
-            print(f"  Total campaigns: {len(mock_campaigns)}")
             print(f"  Users distributed: {result['total_users_distributed']}")
             
             for i, distribution in enumerate(result["distributions"]):
                 campaign = distribution["campaign"]
-                print(f"\n  Campaign {i+1}: {campaign['theory_id']}")
+                base_campaign_id = distribution["base_campaign_id"]
+                print(f"\n  Campaign {i+1}: {base_campaign_id}")
                 print(f"    Total users: {distribution['total_users']}")
                 
-                for group_letter, group_users in distribution["groups"].items():
-                    target = "SC_local_control" if group_letter == 'A' else "SC_local_target + SPSS"
-                    print(f"    Group {group_letter}: {len(group_users)} users → {target}")
+                if "existing_groups_count" in distribution:
+                    print(f"    Found existing groups: {distribution['existing_groups_count']}")
+                else:
+                    print(f"    No existing groups found - campaign skipped")
+                    continue
+                
+                for group_letter, group_data in distribution["groups"].items():
+                    group_users = group_data["users"]
+                    group_theory_id = group_data["theory_id"]
+                    group_type = group_data.get("group_type", "unknown")
+                    target_table = group_data.get("target_table", "unknown")
+                    tab_values = group_data.get("tab_values", {})
+                    
+                    print(f"    Group {group_letter} ({group_theory_id}): {len(group_users)} users → {target_table}")
+                    print(f"      Type: {group_type}")
+                    print(f"      Tab values: {tab_values}")
         else:
             print(f"❌ Distribution failed: {result['message']}")
         
