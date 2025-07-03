@@ -185,7 +185,7 @@ def get_databases() -> List[Dict]:
     """Get list of available databases"""
     return [
         {
-            "id": "dssb_app",
+            "id": "DSSB_APP",
             "name": "Продуктивная база данных DSSB_APP",
             "description": "Основная корпоративная база данных",
             "status": "active"
@@ -214,9 +214,52 @@ def get_table_columns(database_id: str, table_name: str) -> List[Dict]:
     
     return ALLOWED_TABLES[database_id][table_name]["columns"]
 
+def get_table_columns_case_insensitive(database_id: str, table_name: str) -> List[Dict]:
+    """Get columns for a specific table with case-insensitive table name lookup"""
+    # First try exact database_id match
+    db_key = None
+    for key in ALLOWED_TABLES.keys():
+        if key.upper() == database_id.upper():
+            db_key = key
+            break
+    
+    if not db_key:
+        return []
+    
+    # Now try case-insensitive table name lookup
+    table_key = None
+    for key in ALLOWED_TABLES[db_key].keys():
+        if key.upper() == table_name.upper():
+            table_key = key
+            break
+    
+    if not table_key:
+        return []
+    
+    return ALLOWED_TABLES[db_key][table_key]["columns"]
+
 def is_table_allowed(database_id: str, table_name: str) -> bool:
     """Check if table access is allowed"""
     return database_id in ALLOWED_TABLES and table_name in ALLOWED_TABLES[database_id]
+
+def is_table_allowed_case_insensitive(database_id: str, table_name: str) -> bool:
+    """Check if table access is allowed with case-insensitive lookup"""
+    # First try exact database_id match
+    db_key = None
+    for key in ALLOWED_TABLES.keys():
+        if key.upper() == database_id.upper():
+            db_key = key
+            break
+    
+    if not db_key:
+        return False
+    
+    # Now try case-insensitive table name lookup
+    for key in ALLOWED_TABLES[db_key].keys():
+        if key.upper() == table_name.upper():
+            return True
+    
+    return False
 
 def execute_query(sql: str, params: Dict = None) -> Dict:
     """Execute SQL query and return results"""
@@ -836,16 +879,16 @@ def get_active_campaigns_for_daily_process():
         }
 
 def get_spss_count_day_5_users():
-    """Get users from SPSS_USER_DRACRM.SC_1_120 where COUNT_DAY = 5"""
+    """Get users from SPSS_USER_DRACRM.SC_1_120 where COUNT_DAY > 5 and COUNT_DAY < 31"""
     try:
         connection = get_connection_SPSS()
         cursor = connection.cursor()
         
-        # Query for users with COUNT_DAY = 5
+        # Query for users with COUNT_DAY > 5 and COUNT_DAY < 31
         query = """
         SELECT IIN
         FROM SPSS_USER_DRACRM.SC_1_120
-        WHERE COUNT_DAY = 5
+        WHERE COUNT_DAY > 5 and COUNT_DAY < 31 and COLLECTOR_COMPANY = 'ZRSLN_KOMP.08' or COLLECTOR_COMPANY = '-1' or COLLECTOR_COMPANY = 'ZRSLN_KOMP.101' or COLLECTOR_COMPANY = 'ZRSLN_KOMP.99'
         ORDER BY IIN
         """
         
@@ -865,11 +908,11 @@ def get_spss_count_day_5_users():
             "success": True,
             "iin_values": list(set(iin_values)),  # Remove duplicates
             "count": len(set(iin_values)),
-            "message": f"Found {len(set(iin_values))} unique users with COUNT_DAY = 5"
+            "message": f"Found {len(set(iin_values))} unique users with COUNT_DAY > 5 and COUNT_DAY < 31"
         }
         
     except Exception as e:
-        print(f"Error getting SPSS COUNT_DAY = 5 users: {e}")
+        print(f"Error getting SPSS COUNT_DAY COUNT_DAY > 5 and COUNT_DAY < 31 users: {e}")
         return {
             "success": False,
             "iin_values": [],
@@ -1205,7 +1248,7 @@ def process_daily_user_distribution():
         process_result["campaigns_found"] = campaigns_result["count"]
         print(f"Found {campaigns_result['count']} active campaigns")
         
-        # Step 2: Get users with COUNT_DAY = 5 from SPSS
+        # Step 2: Get users with COUNT_DAY COUNT_DAY > 5 and COUNT_DAY < 31 from SPSS
         process_result["process_stage"] = "getting_spss_users"
         spss_users_result = get_spss_count_day_5_users()
         
@@ -1219,7 +1262,7 @@ def process_daily_user_distribution():
             return process_result
         
         process_result["users_found"] = spss_users_result["count"]
-        print(f"Found {spss_users_result['count']} users with COUNT_DAY = 5")
+        print(f"Found {spss_users_result['count']} users with COUNT_DAY > 5 and COUNT_DAY < 31")
         
         # Step 3: Distribute users among campaigns
         process_result["process_stage"] = "distributing_users"

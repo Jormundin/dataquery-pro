@@ -77,11 +77,11 @@ export const databaseAPI = {
   getDatabases: () => api.get('/databases'),
   
   // Get tables for a specific database
-  getTables: (databaseId) => api.get(`/databases/${databaseId}/tables`),
+  getTables: (databaseId) => api.get(`/databases/${encodeURIComponent(databaseId)}/tables`),
   
   // Get columns for a specific table
   getTableColumns: (databaseId, tableName) => 
-    api.get(`/databases/${databaseId}/tables/${tableName}/columns`),
+    api.get(`/databases/${encodeURIComponent(databaseId)}/tables/${encodeURIComponent(tableName)}/columns`),
   
   // Test database connection
   testConnection: (connectionData) => 
@@ -139,7 +139,20 @@ export const databaseAPI = {
       console.error('Stratification and theory creation error:', error);
       throw error;
     }
-  }
+  },
+
+  // Monitoring endpoints
+  getMonitoringOverview: () => 
+    api.get('/monitoring/overview'),
+  
+  getMonitoringDailyStats: (daysBack = 7) => 
+    api.get(`/monitoring/daily-statistics?days_back=${daysBack}`),
+  
+  getMonitoringCampaignDistribution: () => 
+    api.get('/monitoring/campaign-distribution'),
+  
+  getMonitoringRecentActivity: (limit = 50) => 
+    api.get(`/monitoring/recent-activity?limit=${limit}`)
 };
 
 // Data API endpoints

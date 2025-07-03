@@ -402,12 +402,8 @@ def send_campaign_success_notification(stratification_result: Dict[str, Any], us
     try:
         subject, message = create_campaign_success_email(stratification_result, user)
         
-        # Create JSON attachment with detailed results
-        json_data = json.dumps(stratification_result, indent=2, ensure_ascii=False, default=str)
-        attachment = BytesIO(json_data.encode('utf-8'))
-        attachment.name = f"campaign_details_{stratification_result.get('base_campaign_id', 'unknown')}.json"
-        
-        return send_email(CAMPAIGN_NOTIFICATION_EMAILS, subject, message, [attachment])
+        # Send email without attachment to avoid size limit issues with large datasets (100,000+ users)
+        return send_email(CAMPAIGN_NOTIFICATION_EMAILS, subject, message)
     except Exception as e:
         logger.error(f"Failed to send campaign success notification: {str(e)}")
         return False
@@ -669,7 +665,7 @@ def create_daily_distribution_success_email(process_result: Dict[str, Any]) -> t
             <ul style="margin: 0; padding-left: 20px;">
                 <li><strong>Группа A (контроль):</strong> размещена в <code>DSSB_APP.SC_local_control</code></li>
                 <li><strong>Группы B, C, D, E (целевые):</strong> размещены в <code>DSSB_APP.SC_local_target</code> и <code>SPSS.SC_theory_users</code></li>
-                <li><strong>Источник данных:</strong> <code>SPSS_USER_DRACRM.SC_1_120</code> (COUNT_DAY = 5)</li>
+                <li><strong>Источник данных:</strong> <code>SPSS_USER_DRACRM.SC_1_120</code> (COUNT_DAY > 5 and COUNT_DAY < 31)</li>
             </ul>
         </div>
         
@@ -706,7 +702,7 @@ def create_daily_distribution_skip_email(process_result: Dict[str, Any]) -> tupl
     
     skip_reasons = {
         'no_active_campaigns': 'Нет активных кампаний',
-        'no_count_day_5_users': 'Нет пользователей с COUNT_DAY = 5'
+        'no_count_day_5_users': 'Нет пользователей с COUNT_DAY > 5 and COUNT_DAY < 31'
     }
     
     skip_message = skip_reasons.get(skip_reason, f'Неизвестная причина: {skip_reason}')
@@ -777,7 +773,7 @@ def create_daily_distribution_skip_email(process_result: Dict[str, Any]) -> tupl
             <p>Автоматическая дистрибуция пропускается в следующих случаях:</p>
             <ul>
                 <li><strong>Нет активных кампаний:</strong> В данный момент нет кампаний со статусом "активный"</li>
-                <li><strong>Нет новых пользователей:</strong> В таблице SPSS_USER_DRACRM.SC_1_120 не найдено пользователей с COUNT_DAY = 5</li>
+                <li><strong>Нет новых пользователей:</strong> В таблице SPSS_USER_DRACRM.SC_1_120 не найдено пользователей с COUNT_DAY > 5 and COUNT_DAY < 31</li>
             </ul>
             <p>Система продолжит проверку завтра в 09:00.</p>
         </div>
@@ -923,12 +919,8 @@ def send_daily_distribution_success_email(process_result: Dict[str, Any]) -> boo
     try:
         subject, message = create_daily_distribution_success_email(process_result)
         
-        # Create JSON attachment with detailed results
-        json_data = json.dumps(process_result, indent=2, ensure_ascii=False, default=str)
-        attachment = BytesIO(json_data.encode('utf-8'))
-        attachment.name = f"daily_distribution_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-        
-        return send_email(CAMPAIGN_NOTIFICATION_EMAILS, subject, message, [attachment])
+        # Send email without attachment to avoid size limit issues with large datasets (100,000+ users)
+        return send_email(CAMPAIGN_NOTIFICATION_EMAILS, subject, message)
     except Exception as e:
         logger.error(f"Failed to send daily distribution success notification: {str(e)}")
         return False

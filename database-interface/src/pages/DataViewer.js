@@ -54,7 +54,7 @@ const DataViewer = () => {
 
   const loadTableColumns = async () => {
     try {
-      const response = await databaseAPI.getTableColumns('dssb_app', selectedTable);
+      const response = await databaseAPI.getTableColumns('DSSB_APP', selectedTable);
       const tableColumns = response.data || [];
       
       // Convert backend column format to frontend format

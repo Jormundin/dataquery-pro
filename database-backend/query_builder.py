@@ -1,6 +1,6 @@
 import re
 from typing import Dict, List, Any, Optional
-from database import is_table_allowed, get_table_columns
+from database import is_table_allowed, get_table_columns, is_table_allowed_case_insensitive, get_table_columns_case_insensitive
 
 class QueryBuilder:
     """Build safe SQL queries from frontend requests"""
@@ -23,14 +23,14 @@ class QueryBuilder:
     
     def validate_table_access(self, database_id: str, table_name: str) -> bool:
         """Validate that the table is allowed for access"""
-        return is_table_allowed(database_id, table_name)
+        return is_table_allowed_case_insensitive(database_id, table_name)
     
     def validate_columns(self, database_id: str, table_name: str, columns: List[str]) -> bool:
         """Validate that all requested columns exist in the table"""
         if not columns:
             return True
         
-        allowed_columns = get_table_columns(database_id, table_name)
+        allowed_columns = get_table_columns_case_insensitive(database_id, table_name)
         allowed_column_names = [col['name'].lower() for col in allowed_columns]
         
         for column in columns:
@@ -99,7 +99,7 @@ class QueryBuilder:
             return ""
         
         # Get allowed columns for validation
-        allowed_columns = get_table_columns(database_id, table_name)
+        allowed_columns = get_table_columns_case_insensitive(database_id, table_name)
         allowed_column_names = [col['name'].lower() for col in allowed_columns]
         
         conditions = []
@@ -152,7 +152,7 @@ class QueryBuilder:
             return ""
         
         # Validate column exists
-        allowed_columns = get_table_columns(database_id, table_name)
+        allowed_columns = get_table_columns_case_insensitive(database_id, table_name)
         allowed_column_names = [col['name'].lower() for col in allowed_columns]
         
         if sort_by.lower() not in allowed_column_names:

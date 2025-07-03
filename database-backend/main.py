@@ -186,9 +186,12 @@ async def list_tables(database_id: str, current_user: dict = Depends(get_current
 async def list_columns(database_id: str, table_name: str, current_user: dict = Depends(get_current_user_dependency)):
     """Получить список столбцов для таблицы"""
     try:
-        columns = get_table_columns(database_id.upper(), table_name.upper())
+        # Use case-insensitive lookup for table names
+        from database import get_table_columns_case_insensitive
+        columns = get_table_columns_case_insensitive(database_id, table_name)
         return columns
     except Exception as e:
+        print(f"ERROR in list_columns: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Ошибка получения столбцов: {str(e)}")
 
 @app.post("/databases/test-connection", response_model=ConnectionTestResponse)
@@ -909,7 +912,7 @@ async def export_data(
         raise HTTPException(status_code=500, detail=f"Ошибка экспорта: {str(e)}")
 
 @app.get("/data/stats/{table_name}")
-async def get_data_stats(table_name: str, database_id: str = Query("dssb_app"), current_user: dict = Depends(get_current_user_dependency)):
+async def get_data_stats(table_name: str, database_id: str = Query("DSSB_APP"), current_user: dict = Depends(get_current_user_dependency)):
     """Получить статистику данных"""
     try:
         # Get table row count
@@ -1896,46 +1899,54 @@ async def get_recent_activity(
         recent_activity = {
             "timestamp": datetime.now().isoformat(),
             "activities": [],
-            "summary": {}
+            "summary": {},
+            "debug_info": {}
         }
         
-        # Get recent activities from SC_local_control
+        # Simplified query - get most recent uploads without grouping by tab fields
+        # This should capture today's data if it was loaded
         control_activity_query = f"""
         SELECT 
-            'SC_local_control' as table_name,
             'Control Group' as activity_type,
             THEORY_ID,
             COUNT(*) as users_count,
-            TO_CHAR(insert_datetime, 'YYYY-MM-DD HH24:MI:SS') as upload_time,
-            tab1, tab2
+            TO_CHAR(MAX(insert_datetime), 'YYYY-MM-DD HH24:MI:SS') as upload_time,
+            MAX(tab1) as tab1, 
+            MAX(tab2) as tab2
         FROM SC_local_control
-        WHERE insert_datetime >= SYSDATE - 7
-        GROUP BY THEORY_ID, TO_CHAR(insert_datetime, 'YYYY-MM-DD HH24:MI:SS'), tab1, tab2
-        ORDER BY insert_datetime DESC
-        FETCH FIRST {limit//3} ROWS ONLY
+        WHERE insert_datetime >= SYSDATE - 30
+        GROUP BY THEORY_ID
+        ORDER BY MAX(insert_datetime) DESC
+        FETCH FIRST {limit//2} ROWS ONLY
         """
         control_result = execute_query(control_activity_query)
         if control_result["success"]:
             recent_activity["activities"].extend(control_result["data"])
+            recent_activity["debug_info"]["control_count"] = len(control_result["data"])
+        else:
+            recent_activity["debug_info"]["control_error"] = control_result.get("error", "Unknown error")
         
         # Get recent activities from SC_local_target
         target_activity_query = f"""
         SELECT 
-            'SC_local_target' as table_name,
             'Target Group' as activity_type,
             THEORY_ID,
             COUNT(*) as users_count,
-            TO_CHAR(insert_datetime, 'YYYY-MM-DD HH24:MI:SS') as upload_time,
-            tab1, tab2
+            TO_CHAR(MAX(insert_datetime), 'YYYY-MM-DD HH24:MI:SS') as upload_time,
+            MAX(tab1) as tab1, 
+            MAX(tab2) as tab2
         FROM SC_local_target
-        WHERE insert_datetime >= SYSDATE - 7
-        GROUP BY THEORY_ID, TO_CHAR(insert_datetime, 'YYYY-MM-DD HH24:MI:SS'), tab1, tab2
-        ORDER BY insert_datetime DESC
-        FETCH FIRST {limit//3} ROWS ONLY
+        WHERE insert_datetime >= SYSDATE - 30
+        GROUP BY THEORY_ID
+        ORDER BY MAX(insert_datetime) DESC
+        FETCH FIRST {limit//2} ROWS ONLY
         """
         target_result = execute_query(target_activity_query)
         if target_result["success"]:
             recent_activity["activities"].extend(target_result["data"])
+            recent_activity["debug_info"]["target_count"] = len(target_result["data"])
+        else:
+            recent_activity["debug_info"]["target_error"] = target_result.get("error", "Unknown error")
         
         # Get recent activities from SPSS
         try:
@@ -1944,33 +1955,34 @@ async def get_recent_activity(
             
             spss_activity_query = f"""
             SELECT 
-                'SPSS_SC_theory_users' as table_name,
                 'SPSS Target' as activity_type,
                 THEORY_ID,
                 COUNT(*) as users_count,
-                TO_CHAR(insert_datetime, 'YYYY-MM-DD HH24:MI:SS') as upload_time,
-                tab1, tab2
+                TO_CHAR(MAX(insert_datetime), 'YYYY-MM-DD HH24:MI:SS') as upload_time,
+                MAX(tab1) as tab1, 
+                MAX(tab2) as tab2
             FROM SC_theory_users
-            WHERE insert_datetime >= SYSDATE - 7
-            GROUP BY THEORY_ID, TO_CHAR(insert_datetime, 'YYYY-MM-DD HH24:MI:SS'), tab1, tab2
-            ORDER BY insert_datetime DESC
-            FETCH FIRST {limit//3} ROWS ONLY
+            WHERE insert_datetime >= SYSDATE - 30
+            GROUP BY THEORY_ID
+            ORDER BY MAX(insert_datetime) DESC
+            FETCH FIRST {limit//2} ROWS ONLY
             """
             spss_cursor.execute(spss_activity_query)
             columns = [desc[0].lower() for desc in spss_cursor.description]
             
+            spss_data = []
             for row in spss_cursor.fetchall():
-                recent_activity["activities"].append(dict(zip(columns, row)))
+                spss_data.append(dict(zip(columns, row)))
+            
+            recent_activity["activities"].extend(spss_data)
+            recent_activity["debug_info"]["spss_count"] = len(spss_data)
             
             spss_cursor.close()
             spss_conn.close()
             
         except Exception as spss_error:
-            recent_activity["activities"].append({
-                "table_name": "SPSS_SC_theory_users",
-                "activity_type": "Error",
-                "error": str(spss_error)
-            })
+            print(f"SPSS error in recent activity: {spss_error}")
+            recent_activity["debug_info"]["spss_error"] = str(spss_error)
         
         # Sort all activities by upload_time
         valid_activities = [a for a in recent_activity["activities"] if "upload_time" in a]
@@ -1982,7 +1994,7 @@ async def get_recent_activity(
             "total_activities": len(valid_activities),
             "unique_campaigns": len(set(a.get("theory_id", "") for a in valid_activities if a.get("theory_id"))),
             "total_users_uploaded": sum(a.get("users_count", 0) for a in valid_activities),
-            "period": "Last 7 days"
+            "period": "Last 30 days"
         }
         
         return {
@@ -1994,6 +2006,88 @@ async def get_recent_activity(
         return {
             "success": False,
             "error": f"Error getting recent activity: {str(e)}",
+            "timestamp": datetime.now().isoformat()
+        }
+
+@app.get("/debug/recent-activity-raw")
+async def debug_recent_activity_raw(current_user: dict = Depends(get_current_user_dependency)):
+    """Debug endpoint to check raw recent activity data"""
+    try:
+        from database import execute_query, get_connection_SPSS
+        
+        debug_info = {
+            "timestamp": datetime.now().isoformat(),
+            "local_control": {},
+            "local_target": {},
+            "spss_theory": {}
+        }
+        
+        # Check SC_local_control raw data
+        control_debug_query = """
+        SELECT 
+            COUNT(*) as total_records,
+            COUNT(DISTINCT THEORY_ID) as unique_campaigns,
+            TO_CHAR(MIN(insert_datetime), 'YYYY-MM-DD HH24:MI:SS') as earliest_insert,
+            TO_CHAR(MAX(insert_datetime), 'YYYY-MM-DD HH24:MI:SS') as latest_insert,
+            COUNT(CASE WHEN insert_datetime >= SYSDATE - 1 THEN 1 END) as today_records,
+            COUNT(CASE WHEN insert_datetime >= SYSDATE - 7 THEN 1 END) as week_records
+        FROM SC_local_control
+        """
+        control_result = execute_query(control_debug_query)
+        if control_result["success"] and control_result["data"]:
+            debug_info["local_control"] = control_result["data"][0]
+        
+        # Check SC_local_target raw data  
+        target_debug_query = """
+        SELECT 
+            COUNT(*) as total_records,
+            COUNT(DISTINCT THEORY_ID) as unique_campaigns,
+            TO_CHAR(MIN(insert_datetime), 'YYYY-MM-DD HH24:MI:SS') as earliest_insert,
+            TO_CHAR(MAX(insert_datetime), 'YYYY-MM-DD HH24:MI:SS') as latest_insert,
+            COUNT(CASE WHEN insert_datetime >= SYSDATE - 1 THEN 1 END) as today_records,
+            COUNT(CASE WHEN insert_datetime >= SYSDATE - 7 THEN 1 END) as week_records
+        FROM SC_local_target
+        """
+        target_result = execute_query(target_debug_query)
+        if target_result["success"] and target_result["data"]:
+            debug_info["local_target"] = target_result["data"][0]
+        
+        # Check SPSS data
+        try:
+            spss_conn = get_connection_SPSS()
+            spss_cursor = spss_conn.cursor()
+            
+            spss_debug_query = """
+            SELECT 
+                COUNT(*) as total_records,
+                COUNT(DISTINCT THEORY_ID) as unique_campaigns,
+                TO_CHAR(MIN(insert_datetime), 'YYYY-MM-DD HH24:MI:SS') as earliest_insert,
+                TO_CHAR(MAX(insert_datetime), 'YYYY-MM-DD HH24:MI:SS') as latest_insert,
+                COUNT(CASE WHEN insert_datetime >= SYSDATE - 1 THEN 1 END) as today_records,
+                COUNT(CASE WHEN insert_datetime >= SYSDATE - 7 THEN 1 END) as week_records
+            FROM SC_theory_users
+            """
+            spss_cursor.execute(spss_debug_query)
+            columns = [desc[0].lower() for desc in spss_cursor.description]
+            row = spss_cursor.fetchone()
+            if row:
+                debug_info["spss_theory"] = dict(zip(columns, row))
+            
+            spss_cursor.close()
+            spss_conn.close()
+            
+        except Exception as spss_error:
+            debug_info["spss_theory"] = {"error": str(spss_error)}
+        
+        return {
+            "success": True,
+            "debug_info": debug_info
+        }
+        
+    except Exception as e:
+        return {
+            "success": False,
+            "error": f"Error in debug endpoint: {str(e)}",
             "timestamp": datetime.now().isoformat()
         }
 
