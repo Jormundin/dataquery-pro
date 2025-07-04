@@ -838,10 +838,11 @@ async def get_data(
     database_id: str = Query(..., description="Database ID"),
     table: str = Query(..., description="Table name"),
     page: int = Query(1, ge=1),
-    limit: int = Query(100, ge=1, le=500), # Increased default and max limit for better performance
+    limit: int = Query(100, ge=1, le=1000), # Increased max limit for large datasets
     search: Optional[str] = Query(None),
     sort_by: Optional[str] = Query(None),
     sort_order: str = Query("asc"),
+    client_id: Optional[str] = Query(None, description="Client ID for progress tracking"),
     current_user: dict = Depends(get_current_user_dependency)
 ):
     """Получить данные с фильтрами и пагинацией - оптимизированная версия для больших датасетов"""
@@ -881,7 +882,7 @@ async def get_data(
         
         # Step 1: Get total count efficiently
         count_query = f"SELECT COUNT(*) as total_count FROM {table.upper()} {where_clause}"
-        count_result = execute_query(count_query, query_params)
+        count_result = execute_query_safe(count_query, query_params)
         
         total_count = 0
         if count_result["success"] and count_result["data"]:
@@ -903,7 +904,15 @@ async def get_data(
         WHERE rnum > {offset}
         """
         
-        data_result = execute_query(paginated_query, query_params)
+        # Create progress callback if client_id provided
+        progress_callback = None
+        if client_id:
+            def progress_callback(progress_data):
+                # Schedule the async task in the main thread
+                asyncio.create_task(send_progress_update(client_id, progress_data))
+        
+        # Use improved query execution for large datasets
+        data_result = execute_query_safe(paginated_query, query_params, progress_callback=progress_callback)
         
         if data_result["success"]:
             # Remove the 'rnum' column from results
@@ -925,7 +934,21 @@ async def get_data(
             raise HTTPException(status_code=500, detail=data_result["message"])
             
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Ошибка получения данных: {str(e)}")
+        # Log the full error for debugging
+        import traceback
+        print(f"Data endpoint error: {str(e)}")
+        traceback.print_exc()
+        
+        # Provide more specific error messages
+        error_message = str(e).lower()
+        if "timeout" in error_message:
+            raise HTTPException(status_code=504, detail="Время ожидания данных истекло. Попробуйте уменьшить количество записей на страницу.")
+        elif "memory" in error_message or "out of memory" in error_message:
+            raise HTTPException(status_code=507, detail="Недостаточно памяти для загрузки данных. Попробуйте уменьшить количество записей на страницу.")
+        elif "connection" in error_message:
+            raise HTTPException(status_code=503, detail="Ошибка подключения к базе данных. Попробуйте позже.")
+        else:
+            raise HTTPException(status_code=500, detail=f"Ошибка получения данных: {str(e)}")
 
 @app.get("/data/export")
 async def export_data(

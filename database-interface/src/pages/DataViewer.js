@@ -25,11 +25,44 @@ const DataViewer = () => {
   const [selectedTable, setSelectedTable] = useState('');
   const [tables, setTables] = useState([]);
   const [columns, setColumns] = useState([]);
+  
+  // Progress tracking state
+  const [loadProgress, setLoadProgress] = useState(null);
+  const [wsClient, setWsClient] = useState(null);
+  const [clientId] = useState(() => Math.random().toString(36).substr(2, 9));
 
   // No default columns - will be loaded dynamically from actual table structure
 
   useEffect(() => {
     loadTables();
+    
+    // Setup WebSocket connection for progress updates
+    const ws = new WebSocket(`ws://localhost:8000/ws/progress/${clientId}`);
+    
+    ws.onopen = () => {
+      console.log('DataViewer WebSocket connected for progress tracking');
+      setWsClient(ws);
+    };
+    
+    ws.onmessage = (event) => {
+      const progress = JSON.parse(event.data);
+      setLoadProgress(progress);
+    };
+    
+    ws.onerror = (error) => {
+      console.error('DataViewer WebSocket error:', error);
+    };
+    
+    ws.onclose = () => {
+      console.log('DataViewer WebSocket disconnected');
+      setWsClient(null);
+    };
+    
+    return () => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.close();
+      }
+    };
   }, []);
 
   useEffect(() => {
@@ -86,6 +119,7 @@ const DataViewer = () => {
     
     setIsLoading(true);
     setError(null);
+    setLoadProgress(null); // Reset progress
     
     try {
       const params = {
@@ -95,7 +129,8 @@ const DataViewer = () => {
         limit: rowsPerPage,
         search: searchTerm,
         sort_by: sortColumn,
-        sort_order: sortDirection
+        sort_order: sortDirection,
+        client_id: clientId // Add client ID for progress tracking
       };
 
       const response = await dataAPI.getData(params);
@@ -118,13 +153,38 @@ const DataViewer = () => {
       
     } catch (err) {
       console.error('Error loading data:', err);
-      setError('Ошибка загрузки данных: ' + (err.response?.data?.detail || err.message));
+      
+      // Handle different error types
+      let errorMessage = 'Ошибка загрузки данных';
+      
+      if (err.response) {
+        // Server responded with error
+        const status = err.response.status;
+        const detail = err.response.data?.detail;
+        
+        if (status === 504) {
+          errorMessage = detail || 'Время ожидания данных истекло. Попробуйте уменьшить количество записей на страницу.';
+        } else if (status === 507) {
+          errorMessage = detail || 'Недостаточно памяти для загрузки данных. Попробуйте уменьшить количество записей на страницу.';
+        } else if (status === 503) {
+          errorMessage = detail || 'Ошибка подключения к базе данных. Попробуйте позже.';
+        } else {
+          errorMessage = detail || err.response.data?.message || errorMessage;
+        }
+      } else if (err.code === 'ECONNABORTED') {
+        errorMessage = 'Время ожидания данных истекло. Попробуйте уменьшить количество записей на страницу.';
+      } else {
+        errorMessage = err.message || errorMessage;
+      }
+      
+      setError(errorMessage);
       
       // Set empty data when API fails - no dummy data
       setData([]);
       setTotalRows(0);
     } finally {
       setIsLoading(false);
+      setLoadProgress(null); // Clear progress when done
     }
   };
 
@@ -375,6 +435,9 @@ const DataViewer = () => {
                     <option value={25}>25 строк</option>
                     <option value={50}>50 строк</option>
                     <option value={100}>100 строк</option>
+                    <option value={250}>250 строк</option>
+                    <option value={500}>500 строк</option>
+                    <option value={1000}>1000 строк</option>
                   </select>
                 </div>
 
@@ -406,6 +469,38 @@ const DataViewer = () => {
                 </div>
               </div>
             </div>
+            
+            {/* Progress Bar */}
+            {loadProgress && (
+              <div style={{ 
+                padding: '1rem',
+                borderTop: '1px solid #e5e7eb'
+              }}>
+                <div style={{ 
+                  width: '100%', 
+                  backgroundColor: '#e5e7eb', 
+                  borderRadius: '0.375rem', 
+                  overflow: 'hidden'
+                }}>
+                  <div 
+                    style={{
+                      height: '0.5rem',
+                      backgroundColor: '#3b82f6',
+                      width: `${loadProgress.percent || 0}%`,
+                      transition: 'width 0.3s ease'
+                    }}
+                  />
+                </div>
+                <div style={{ 
+                  fontSize: '0.75rem', 
+                  color: '#374151', 
+                  marginTop: '0.5rem',
+                  textAlign: 'center'
+                }}>
+                  {loadProgress.message} ({Math.round(loadProgress.percent || 0)}%)
+                </div>
+              </div>
+            )}
 
             {/* Statistics */}
             <div style={{ 
