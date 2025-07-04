@@ -667,7 +667,7 @@ async def stratify_and_create_theories(data: Dict[str, Any], current_user: dict 
         except ImportError as e:
             raise HTTPException(status_code=500, detail=f"Отсутствует зависимость для стратификации: {str(e)}")
 
-        # Prepare data for stratification with memory management options
+        # Prepare data for stratification - disable sampling to use full dataset
         stratification_request = {
             "data": result["data"],
             "columns": result["columns"],
@@ -675,10 +675,10 @@ async def stratify_and_create_theories(data: Dict[str, Any], current_user: dict 
             "stratify_cols": stratification_config.get("stratifyColumns", []),
             "replace_nan": True,
             "random_state": stratification_config.get("randomSeed", 42),
-            # Memory management settings
-            "max_memory_rows": 500000,  # Process up to 500K rows in memory
-            "sample_size": min(100000, row_count),  # Use sampling for large datasets
-            "use_sampling": row_count > 500000  # Enable sampling for large datasets
+            # Memory management settings - process full dataset
+            "max_memory_rows": 10000000,  # Allow processing up to 10M rows
+            "sample_size": row_count,  # Don't sample - use full dataset
+            "use_sampling": False  # Disable sampling to use full 2.7M dataset
         }
         
         # Check for case sensitivity issues and fix column names
