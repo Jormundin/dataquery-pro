@@ -587,7 +587,7 @@ def execute_query_with_limit_check(sql: str, params: Dict = None, max_rows: int 
             print("Count query detected, executing directly")
             return execute_query(sql, params)
             
-        # Check if query already has a limit, but still use chunking for very large requests
+        # Check if query already has a limit, but still use chunking for datasets that need frontend limiting
         if "ROWNUM" in sql.upper() or "FETCH FIRST" in sql.upper():
             # Extract the limit from ROWNUM query to check if it's too large
             import re
@@ -595,13 +595,14 @@ def execute_query_with_limit_check(sql: str, params: Dict = None, max_rows: int 
             if rownum_match:
                 limit_value = int(rownum_match.group(1))
                 print(f"Query has ROWNUM limit: {limit_value:,}")
-                if limit_value > max_rows:
-                    print(f"ROWNUM limit ({limit_value:,}) exceeds threshold ({max_rows:,}), using chunked processing anyway")
-                    print(f"🔄 CALLING: execute_query_chunked_with_limit for large ROWNUM query")
+                # Use chunked processing for any query with more than 100 rows to enable frontend limiting
+                if limit_value > 100:
+                    print(f"ROWNUM limit ({limit_value:,}) > 100 rows, using chunked processing to limit frontend to 100 rows")
+                    print(f"🔄 CALLING: execute_query_chunked_with_limit for ROWNUM query")
                     return execute_query_chunked_with_limit(sql, params, limit_value, progress_callback=progress_callback)
                 else:
-                    print("Query already has reasonable limit, executing directly")
-                    print(f"⚡ CALLING: execute_query (direct) for small ROWNUM query")
+                    print("Query has very small limit (<= 100), executing directly")
+                    print(f"⚡ CALLING: execute_query (direct) for tiny query")
                     return execute_query(sql, params)
             else:
                 print("Query already has limit, executing directly")
