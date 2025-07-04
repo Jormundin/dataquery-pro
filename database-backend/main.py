@@ -861,7 +861,7 @@ async def stratify_and_create_theories(data: Dict[str, Any], current_user: dict 
             if email_sent:
                 print(f"Success notification email sent for campaign {base_campaign_id}")
             else:
-                print(f"Failed to send success notification email for campaign {base_campaign_id}")
+                print(f"Failed to send success notification email for campaign {base_campaign_id} - likely due to invalid email addresses")
         except Exception as e:
             print(f"Error sending success notification email: {str(e)}")
             # Don't fail the entire operation if email fails

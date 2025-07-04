@@ -521,14 +521,9 @@ def stratify_data(request_data: Dict[str, Any]) -> Dict[str, Any]:
     total_rows = df.shape[0]
    
     for i, split_df in enumerate(splits):
-        # Handle JSON conversion for large datasets
-        if len(split_df) > 100000:
-            print(f"Split {i+1} contains {len(split_df)} rows. Using efficient JSON conversion.")
-            # For very large splits, use more efficient conversion
-            split_data_json = split_df.head(100000).to_dict(orient='records')
-            print(f"Note: Split {i+1} JSON response limited to first 100,000 rows for efficiency.")
-        else:
-            split_data_json = split_df.to_dict(orient='records')
+        # Convert full dataset to JSON (no limits)
+        print(f"Split {i+1} contains {len(split_df)} rows. Converting full dataset to JSON.")
+        split_data_json = split_df.to_dict(orient='records')
         actual_proportion = split_df.shape[0] / total_rows
        
         stratum_info = {
