@@ -73,10 +73,13 @@ const QueryBuilder = () => {
     
     // Setup WebSocket connection for progress updates
     const wsUrl = process.env.REACT_APP_WS_URL || 'ws://localhost:8000';
-    const ws = new WebSocket(`${wsUrl}/ws/progress/${clientId}`);
+    const fullWsUrl = `${wsUrl}/ws/progress/${clientId}`;
+    console.log('Attempting WebSocket connection to:', fullWsUrl);
+    
+    const ws = new WebSocket(fullWsUrl);
     
     ws.onopen = () => {
-      console.log('WebSocket connected for progress tracking');
+      console.log('✅ WebSocket connected for progress tracking');
       setWsClient(ws);
     };
     
@@ -87,11 +90,12 @@ const QueryBuilder = () => {
     };
     
     ws.onerror = (error) => {
-      console.error('WebSocket error:', error);
+      console.error('❌ WebSocket error:', error);
+      console.error('WebSocket URL was:', fullWsUrl);
     };
     
-    ws.onclose = () => {
-      console.log('WebSocket disconnected');
+    ws.onclose = (event) => {
+      console.log('WebSocket disconnected. Code:', event.code, 'Reason:', event.reason);
       setWsClient(null);
     };
     
@@ -319,10 +323,11 @@ const QueryBuilder = () => {
     }
   };
 
-  // Pagination helper functions for query results
+  // Pagination helper functions for query results (frontend pagination of displayed data)
   const getResultsPaginatedData = () => {
     if (!queryResults || !queryResults.data) return [];
     
+    // Since we only show 100 rows max, pagination is only for those 100 rows
     const startIndex = (resultsCurrentPage - 1) * resultsRowsPerPage;
     const endIndex = startIndex + resultsRowsPerPage;
     return queryResults.data.slice(startIndex, endIndex);
@@ -330,6 +335,7 @@ const QueryBuilder = () => {
 
   const getResultsTotalPages = () => {
     if (!queryResults || !queryResults.data) return 1;
+    // Pagination only for the displayed data (max 100 rows)
     return Math.ceil(queryResults.data.length / resultsRowsPerPage);
   };
 
@@ -340,9 +346,10 @@ const QueryBuilder = () => {
   const getResultsPaginationInfo = () => {
     if (!queryResults || !queryResults.data) return { start: 0, end: 0, total: 0 };
     
+    // Pagination info for displayed data only (max 100 rows)
     const startIndex = (resultsCurrentPage - 1) * resultsRowsPerPage + 1;
     const endIndex = Math.min(resultsCurrentPage * resultsRowsPerPage, queryResults.data.length);
-    const total = queryResults.data.length;
+    const total = queryResults.data.length; // Only displayed rows
     
     return { start: startIndex, end: endIndex, total };
   };
@@ -516,16 +523,29 @@ const QueryBuilder = () => {
     setError(null);
 
     try {
-      // Prepare query data for stratification
-      const queryData = {
-        database_id: selectedDatabase,
-        table: selectedTable,
-        columns: selectedColumns.length > 0 ? selectedColumns : columns.map(col => col.name),
-        filters: filters.filter(f => f.column && f.value),
-        sort_by: sortBy,
-        sort_order: sortOrder,
-        limit: limit // Use the user's selected limit
-      };
+      // Check if we have a temp file with full dataset
+      let queryData;
+      if (queryResults?.tempFileId) {
+        console.log('Using temp file for stratification:', queryResults.tempFileId);
+        // Use temp file data for stratification
+        queryData = {
+          temp_file_id: queryResults.tempFileId,
+          columns: queryResults.columns,
+          total_rows: queryResults.totalRows
+        };
+      } else {
+        console.log('No temp file available, using direct query for stratification');
+        // Fallback to direct query (for smaller datasets)
+        queryData = {
+          database_id: selectedDatabase,
+          table: selectedTable,
+          columns: selectedColumns.length > 0 ? selectedColumns : columns.map(col => col.name),
+          filters: filters.filter(f => f.column && f.value),
+          sort_by: sortBy,
+          sort_order: sortOrder,
+          limit: limit
+        };
+      }
 
       const response = await databaseAPI.stratifyAndCreateTheories(queryData, stratificationConfig);
 
@@ -1034,7 +1054,8 @@ const QueryBuilder = () => {
               fontSize: '0.75rem',
               color: '#6b7280'
             }}>
-              🔄 Загружается... {queryProgress ? `(${Math.round(queryProgress.percent || 0)}%)` : '(подключение...)'}
+              🔄 Загружается... {queryProgress ? `(${Math.round(queryProgress.percent || 0)}%)` : '(подключение...)'}<br/>
+              WebSocket: {wsClient ? '✅ Подключен' : '❌ Не подключен'} | Client ID: {clientId}
             </div>
           )}
           
@@ -1195,7 +1216,12 @@ const QueryBuilder = () => {
                 <button 
                   className="btn btn-success"
                   onClick={() => {
-                    // Export functionality could be added here
+                    // Check if this is a large dataset with temp file
+                    if (queryResults.tempFileId && queryResults.totalRows > 100) {
+                      alert(`⚠️ Внимание: Ваш запрос содержит ${queryResults.totalRows?.toLocaleString()} записей.\n\nЭкспорт будет содержать только первые ${queryResults.data.length} записей, отображаемых в таблице.\n\nДля экспорта всех данных используйте функцию стратификации или обратитесь к администратору.`);
+                    }
+                    
+                    // Export only displayed data (max 100 rows)
                     const csvContent = [
                       queryResults.columns.join(','),
                       ...queryResults.data.map(row =>
@@ -1207,7 +1233,10 @@ const QueryBuilder = () => {
                     const url = window.URL.createObjectURL(blob);
                     const a = document.createElement('a');
                     a.href = url;
-                    a.download = `query_results_${new Date().toISOString().split('T')[0]}.csv`;
+                    const filename = queryResults.tempFileId 
+                      ? `query_results_sample_${new Date().toISOString().split('T')[0]}.csv`
+                      : `query_results_${new Date().toISOString().split('T')[0]}.csv`;
+                    a.download = filename;
                     a.click();
                     window.URL.revokeObjectURL(url);
                   }}

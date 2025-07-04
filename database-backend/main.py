@@ -532,22 +532,61 @@ async def stratify_and_create_theories(data: Dict[str, Any], current_user: dict 
         if not query_data or not stratification_config:
             raise HTTPException(status_code=400, detail="Отсутствуют данные запроса или конфигурация стратификации")
 
-        # First execute the query to get the data
+        # Check if we have temp file data or need to execute query
         start_time = time.time()
         
-        try:
-            sql_query = query_builder.build_query(query_data)
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Ошибка построения SQL запроса: {str(e)}")
-        
-        try:
-            # Use memory-efficient query execution for large datasets
-            result = execute_query_with_limit_check(sql_query, max_rows=100000)
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Ошибка выполнения запроса: {str(e)}")
-        
-        if not result["success"]:
-            raise HTTPException(status_code=500, detail=f"Ошибка выполнения запроса: {result['message']}")
+        if query_data.get("temp_file_id"):
+            # Use temp file data for large datasets
+            temp_file_id = query_data.get("temp_file_id")
+            print(f"Using temp file for stratification: {temp_file_id}")
+            
+            try:
+                import tempfile
+                import json
+                import os
+                
+                temp_file_path = os.path.join(tempfile.gettempdir(), f"query_result_{temp_file_id}.jsonl")
+                
+                if not os.path.exists(temp_file_path):
+                    raise HTTPException(status_code=400, detail="Временный файл с данными не найден. Повторите запрос.")
+                
+                # Read data from temp file
+                data_rows = []
+                row_count = 0
+                
+                print(f"Reading data from temp file: {temp_file_path}")
+                with open(temp_file_path, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        if line.strip():
+                            data_rows.append(json.loads(line))
+                            row_count += 1
+                
+                result = {
+                    "success": True,
+                    "data": data_rows,
+                    "columns": query_data.get("columns", []),
+                    "row_count": row_count
+                }
+                
+                print(f"Loaded {row_count:,} rows from temp file for stratification")
+                
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=f"Ошибка чтения временного файла: {str(e)}")
+        else:
+            # Execute query for smaller datasets
+            try:
+                sql_query = query_builder.build_query(query_data)
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=f"Ошибка построения SQL запроса: {str(e)}")
+            
+            try:
+                # Use memory-efficient query execution for large datasets
+                result = execute_query_with_limit_check(sql_query, max_rows=100000)
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=f"Ошибка выполнения запроса: {str(e)}")
+            
+            if not result["success"]:
+                raise HTTPException(status_code=500, detail=f"Ошибка выполнения запроса: {result['message']}")
         
         if not result["data"]:
             raise HTTPException(status_code=400, detail="Запрос не возвратил данных для стратификации")
@@ -555,7 +594,7 @@ async def stratify_and_create_theories(data: Dict[str, Any], current_user: dict 
         # Add memory usage warning
         row_count = result["row_count"]
         if row_count > 500000:
-            print(f"Warning: Large dataset for stratification ({row_count} rows). Memory-efficient processing will be used.")
+            print(f"Processing large dataset for stratification ({row_count:,} rows). Memory-efficient processing will be used.")
         
         # Check if required dependencies are available
         try:
