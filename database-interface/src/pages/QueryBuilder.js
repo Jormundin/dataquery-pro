@@ -30,6 +30,11 @@ const QueryBuilder = () => {
   const [rowCount, setRowCount] = useState(null);
   const [isCountLoading, setIsCountLoading] = useState(false);
   const [countError, setCountError] = useState(null);
+  
+  // Progress tracking state
+  const [queryProgress, setQueryProgress] = useState(null);
+  const [wsClient, setWsClient] = useState(null);
+  const [clientId] = useState(() => Math.random().toString(36).substr(2, 9));
 
   // Pagination state for query results
   const [resultsCurrentPage, setResultsCurrentPage] = useState(1);
@@ -65,6 +70,34 @@ const QueryBuilder = () => {
 
   useEffect(() => {
     loadDatabases();
+    
+    // Setup WebSocket connection for progress updates
+    const ws = new WebSocket(`ws://localhost:8000/ws/progress/${clientId}`);
+    
+    ws.onopen = () => {
+      console.log('WebSocket connected for progress tracking');
+      setWsClient(ws);
+    };
+    
+    ws.onmessage = (event) => {
+      const progress = JSON.parse(event.data);
+      setQueryProgress(progress);
+    };
+    
+    ws.onerror = (error) => {
+      console.error('WebSocket error:', error);
+    };
+    
+    ws.onclose = () => {
+      console.log('WebSocket disconnected');
+      setWsClient(null);
+    };
+    
+    return () => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.close();
+      }
+    };
   }, []);
 
   useEffect(() => {
@@ -190,6 +223,7 @@ const QueryBuilder = () => {
     setIsLoading(true);
     setError(null);
     setResultsCurrentPage(1); // Reset pagination on new query
+    setQueryProgress(null); // Reset progress
     
     try {
       const queryData = {
@@ -199,7 +233,8 @@ const QueryBuilder = () => {
         filters: filters.filter(f => f.column && f.value),
         sort_by: sortBy,
         sort_order: sortOrder,
-        limit
+        limit,
+        client_id: clientId // Add client ID for progress tracking
       };
 
       const response = await databaseAPI.executeQuery(queryData);
@@ -209,7 +244,10 @@ const QueryBuilder = () => {
           columns: response.data.columns || [],
           data: response.data.data || [],
           totalRows: response.data.row_count || 0,
-          executionTime: response.data.execution_time || 'неизвестно'
+          rowsDisplayed: response.data.rows_returned || response.data.data?.length || 0,
+          executionTime: response.data.execution_time || 'неизвестно',
+          tempFileId: response.data.temp_file_id || null,
+          message: response.data.message || ''
         });
 
         // Check for IIN columns after successful query
@@ -273,6 +311,7 @@ const QueryBuilder = () => {
       }
     } finally {
       setIsLoading(false);
+      setQueryProgress(null); // Clear progress when done
     }
   };
 
@@ -953,6 +992,34 @@ const QueryBuilder = () => {
             {isLoading ? 'Выполняется...' : 'Выполнить запрос'}
           </button>
           
+          {/* Progress Bar */}
+          {queryProgress && (
+            <div style={{ 
+              width: '100%', 
+              backgroundColor: '#e5e7eb', 
+              borderRadius: '0.375rem', 
+              overflow: 'hidden',
+              marginTop: '1rem'
+            }}>
+              <div 
+                style={{
+                  height: '0.5rem',
+                  backgroundColor: '#3b82f6',
+                  width: `${queryProgress.percent || 0}%`,
+                  transition: 'width 0.3s ease'
+                }}
+              />
+              <div style={{ 
+                fontSize: '0.75rem', 
+                color: '#374151', 
+                padding: '0.25rem 0.5rem',
+                textAlign: 'center'
+              }}>
+                {queryProgress.message} ({Math.round(queryProgress.percent || 0)}%)
+              </div>
+            </div>
+          )}
+          
           {queryResults && (
             <button className="btn btn-success">
               <Download className="nav-icon" style={{ width: '16px', height: '16px' }} />
@@ -1075,8 +1142,20 @@ const QueryBuilder = () => {
               <div>
                 <h2 className="card-title">Результаты запроса</h2>
                 <div style={{ fontSize: '0.875rem', color: '#6b7280', marginTop: '0.25rem' }}>
-                  {queryResults.totalRows} строк • Время выполнения: {queryResults.executionTime}
+                  Всего записей: {queryResults.totalRows?.toLocaleString()} • 
+                  Показано: {queryResults.rowsDisplayed || queryResults.data?.length || 0} • 
+                  Время выполнения: {queryResults.executionTime}
                 </div>
+                {queryResults.message && (
+                  <div style={{ fontSize: '0.875rem', color: '#059669', marginTop: '0.25rem' }}>
+                    {queryResults.message}
+                  </div>
+                )}
+                {queryResults.tempFileId && (
+                  <div style={{ fontSize: '0.875rem', color: '#dc2626', marginTop: '0.25rem' }}>
+                    ⚠️ Большой набор данных сохранен во временном файле для обработки
+                  </div>
+                )}
               </div>
               
               <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>

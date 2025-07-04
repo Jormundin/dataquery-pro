@@ -35,7 +35,7 @@ def test_large_query(token, limit=2700000):
     """Test querying large dataset"""
     headers = {"Authorization": f"Bearer {token}"}
     
-    # Query for 2.7M users
+    # Query for 2.7M users with progress tracking
     query_data = {
         "database_id": "DSSB_APP",
         "table": "DSSB_DM.RB_CLIENTS",
@@ -43,7 +43,8 @@ def test_large_query(token, limit=2700000):
         "filters": [],
         "sort_by": None,
         "sort_order": "asc",
-        "limit": limit
+        "limit": limit,
+        "client_id": f"test_{int(time.time())}"  # Add client ID for progress tracking
     }
     
     print(f"\n🔍 Testing query for {limit:,} records...")
@@ -67,14 +68,21 @@ def test_large_query(token, limit=2700000):
             if data.get("success"):
                 print(f"✅ Query successful!")
                 print(f"   Total rows: {data.get('row_count', 0):,}")
-                print(f"   Rows returned: {len(data.get('data', [])):,}")
+                print(f"   Rows returned to frontend: {data.get('rows_returned', len(data.get('data', []))):,}")
                 print(f"   Execution time: {data.get('execution_time', 'N/A')}")
                 print(f"   Total duration: {duration:.2f} seconds")
                 print(f"   Message: {data.get('message', '')}")
                 
-                # Check if pagination was applied
-                if data.get('row_count', 0) > len(data.get('data', [])):
-                    print(f"   ℹ️  Pagination applied: Showing {len(data.get('data', [])):,} of {data.get('row_count', 0):,} rows")
+                # Check temp file info
+                if data.get('temp_file_id'):
+                    print(f"   📁 Temp file created: {data.get('temp_file_id')}")
+                    print(f"   💾 Large dataset stored in temporary file for processing")
+                
+                # Check if only 100 rows displayed
+                rows_displayed = len(data.get('data', []))
+                if rows_displayed <= 100 and data.get('row_count', 0) > 100:
+                    print(f"   ✅ Memory optimization: Only {rows_displayed} rows loaded in frontend")
+                    print(f"   ✅ Full dataset ({data.get('row_count', 0):,} rows) available for processing")
                 
                 return True
             else:

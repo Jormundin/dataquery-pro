@@ -6,8 +6,11 @@ import math
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional, Any
 from contextlib import asynccontextmanager
+import asyncio
+import json
+import uuid
 
-from fastapi import FastAPI, HTTPException, Query, Response, Depends
+from fastapi import FastAPI, HTTPException, Query, Response, Depends, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -222,6 +225,32 @@ async def test_all_db_connections(current_user: dict = Depends(get_current_user_
             "spss": {"status": "error", "connected": False, "message": str(e)}
         }
 
+# WebSocket for progress updates
+active_connections = {}
+
+@app.websocket("/ws/progress/{client_id}")
+async def websocket_progress(websocket: WebSocket, client_id: str):
+    await websocket.accept()
+    active_connections[client_id] = websocket
+    try:
+        while True:
+            # Keep connection alive
+            await asyncio.sleep(1)
+    except WebSocketDisconnect:
+        del active_connections[client_id]
+    except Exception as e:
+        print(f"WebSocket error: {e}")
+        if client_id in active_connections:
+            del active_connections[client_id]
+
+async def send_progress_update(client_id: str, progress: dict):
+    """Send progress update to a specific client"""
+    if client_id in active_connections:
+        try:
+            await active_connections[client_id].send_json(progress)
+        except Exception as e:
+            print(f"Error sending progress: {e}")
+
 # Protected Query endpoints
 @app.post("/query/execute", response_model=QueryResultResponse)
 async def execute_database_query(request: QueryRequest, current_user: dict = Depends(get_current_user_dependency)):
@@ -233,8 +262,15 @@ async def execute_database_query(request: QueryRequest, current_user: dict = Dep
         request_data = request.dict()
         sql_query = query_builder.build_query_with_memory_check(request_data)
         
+        # Create progress callback if client_id provided
+        progress_callback = None
+        if request.client_id:
+            def progress_callback(progress_data):
+                # Schedule the async task in the main thread
+                asyncio.create_task(send_progress_update(request.client_id, progress_data))
+        
         # Execute query with automatic chunking for large datasets
-        result = execute_query_safe(sql_query)
+        result = execute_query_safe(sql_query, progress_callback=progress_callback)
         
         execution_time = f"{(time.time() - start_time):.3f}s"
         

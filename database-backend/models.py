@@ -11,6 +11,7 @@ class QueryRequest(BaseModel):
     sort_by: Optional[str] = None
     sort_order: Optional[str] = "ASC"
     limit: Optional[int] = 100
+    client_id: Optional[str] = None  # For progress tracking
 
 class QueryRequestLarge(BaseModel):
     """Extended query request for large datasets with memory management options"""

@@ -345,8 +345,15 @@ def execute_query(sql: str, params: Dict = None) -> Dict:
             "error": str(e)
         }
 
-def execute_query_chunked(sql: str, params: Dict = None, chunk_size: int = 50000) -> Dict:
-    """Execute SQL query with chunked processing for large datasets"""
+def execute_query_chunked(sql: str, params: Dict = None, chunk_size: int = 50000, progress_callback=None) -> Dict:
+    """Execute SQL query with chunked processing and temporary file storage for large datasets"""
+    import tempfile
+    import json
+    import os
+    import uuid
+    
+    temp_file_path = None
+    
     try:
         conn = get_connection_DSSB_APP()
         cursor = conn.cursor()
@@ -363,62 +370,82 @@ def execute_query_chunked(sql: str, params: Dict = None, chunk_size: int = 50000
         # Get column names
         columns = [desc[0].lower() for desc in cursor.description] if cursor.description else []
         
-        # For very large datasets (>2M), limit the actual data returned to frontend
-        # while still reporting the full count
-        max_rows_to_return = 100000  # Return max 100K rows to frontend
+        # Create temporary file for large datasets
+        temp_file_id = str(uuid.uuid4())
+        temp_file_path = os.path.join(tempfile.gettempdir(), f"query_result_{temp_file_id}.jsonl")
         
-        # Fetch results in chunks
-        data = []
+        # First 100 rows for immediate display
+        display_data = []
         total_rows = 0
-        rows_returned = 0
         
-        while True:
-            chunk = cursor.fetchmany(chunk_size)
-            if not chunk:
-                break
+        with open(temp_file_path, 'w', encoding='utf-8') as temp_file:
+            while True:
+                chunk = cursor.fetchmany(chunk_size)
+                if not chunk:
+                    break
                 
-            # Only process rows up to max_rows_to_return for frontend
-            rows_to_process = chunk if rows_returned < max_rows_to_return else []
-            if rows_returned < max_rows_to_return and rows_returned + len(chunk) > max_rows_to_return:
-                # Partial chunk to reach exactly max_rows_to_return
-                rows_to_process = chunk[:max_rows_to_return - rows_returned]
-            
-            # Convert chunk to list of dictionaries
-            for row in rows_to_process:
-                row_dict = {}
-                for i, value in enumerate(row):
-                    # Handle different Oracle data types
-                    if isinstance(value, cx_Oracle.LOB):
-                        value = value.read() if value else None
-                    elif hasattr(value, 'isoformat'):  # Date/DateTime
-                        value = value.isoformat()
-                    row_dict[columns[i]] = value
-                data.append(row_dict)
-                rows_returned += 1
-            
-            total_rows += len(chunk)
-            
-            # Progress indicator for very large datasets
-            if total_rows > 1000000 and total_rows % 500000 == 0:
-                print(f"Progress: {total_rows:,} rows processed so far...")
+                # Process chunk
+                for row in chunk:
+                    row_dict = {}
+                    for i, value in enumerate(row):
+                        # Handle different Oracle data types
+                        if isinstance(value, cx_Oracle.LOB):
+                            value = value.read() if value else None
+                        elif hasattr(value, 'isoformat'):  # Date/DateTime
+                            value = value.isoformat()
+                        row_dict[columns[i]] = value
+                    
+                    # Save to temp file
+                    temp_file.write(json.dumps(row_dict, ensure_ascii=False) + '\n')
+                    
+                    # Keep first 100 rows for display
+                    if total_rows < 100:
+                        display_data.append(row_dict)
+                    
+                    total_rows += 1
+                
+                # Send progress update
+                if progress_callback and total_rows > 0:
+                    progress_percent = min(100, (total_rows / 2700000) * 100)  # Estimate based on expected size
+                    try:
+                        progress_callback({
+                            "rows_processed": total_rows,
+                            "percent": progress_percent,
+                            "message": f"Обработано {total_rows:,} записей..."
+                        })
+                    except Exception as e:
+                        print(f"Progress callback error: {e}")
+                
+                # Progress log
+                if total_rows % 500000 == 0:
+                    print(f"Progress: {total_rows:,} rows processed so far...")
         
         cursor.close()
         conn.close()
         
-        message = f"Запрос выполнен успешно ({total_rows:,} записей)"
-        if total_rows > max_rows_to_return:
-            message += f". Показаны первые {max_rows_to_return:,} записей из {total_rows:,} для оптимизации производительности"
+        message = f"Запрос выполнен успешно. Всего записей: {total_rows:,}"
+        if total_rows > 100:
+            message += f". Показаны первые 100 записей. Полный набор данных сохранен во временном файле."
         
         return {
             "success": True,
             "columns": columns,
-            "data": data,
+            "data": display_data,  # Only first 100 rows
             "row_count": total_rows,
-            "rows_returned": rows_returned,
+            "rows_returned": len(display_data),
+            "temp_file_id": temp_file_id,
+            "temp_file_path": temp_file_path,
             "message": message
         }
         
     except Exception as e:
+        # Clean up temp file on error
+        if temp_file_path and os.path.exists(temp_file_path):
+            try:
+                os.remove(temp_file_path)
+            except:
+                pass
+                
         print(f"Chunked query execution error: {e}")
         import traceback
         traceback.print_exc()
@@ -428,7 +455,7 @@ def execute_query_chunked(sql: str, params: Dict = None, chunk_size: int = 50000
             "error": str(e)
         }
 
-def execute_query_with_limit_check(sql: str, params: Dict = None, max_rows: int = 1000000) -> Dict:
+def execute_query_with_limit_check(sql: str, params: Dict = None, max_rows: int = 1000000, progress_callback=None) -> Dict:
     """Execute query with automatic limit checking and chunked processing for large datasets"""
     try:
         # First, check if this is a count query
@@ -457,7 +484,7 @@ def execute_query_with_limit_check(sql: str, params: Dict = None, max_rows: int 
         # Use chunked processing for very large datasets to prevent memory issues
         if row_count > max_rows:
             print(f"Very large dataset detected ({row_count} rows), using chunked processing for memory efficiency.")
-            return execute_query_chunked(sql, params)
+            return execute_query_chunked(sql, params, progress_callback=progress_callback)
         else:
             return execute_query(sql, params)
             
@@ -469,10 +496,10 @@ def execute_query_with_limit_check(sql: str, params: Dict = None, max_rows: int 
             "error": str(e)
         }
 
-def execute_query_safe(sql: str, params: Dict = None) -> Dict:
+def execute_query_safe(sql: str, params: Dict = None, progress_callback=None) -> Dict:
     """Execute query with automatic memory safety checks - optimized for large datasets"""
     # Use higher threshold for limit checking to accommodate normal 2M+ operations
-    return execute_query_with_limit_check(sql, params, max_rows=1000000)
+    return execute_query_with_limit_check(sql, params, max_rows=1000000, progress_callback=progress_callback)
 
 # Theory Management Functions
 def get_next_sc_campaign_id():
