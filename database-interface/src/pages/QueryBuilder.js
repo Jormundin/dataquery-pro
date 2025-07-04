@@ -72,7 +72,8 @@ const QueryBuilder = () => {
     loadDatabases();
     
     // Setup WebSocket connection for progress updates
-    const ws = new WebSocket(`ws://localhost:8000/ws/progress/${clientId}`);
+    const wsUrl = process.env.REACT_APP_WS_URL || 'ws://localhost:8000';
+    const ws = new WebSocket(`${wsUrl}/ws/progress/${clientId}`);
     
     ws.onopen = () => {
       console.log('WebSocket connected for progress tracking');

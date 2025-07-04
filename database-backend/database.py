@@ -352,6 +352,7 @@ def execute_query_chunked(sql: str, params: Dict = None, chunk_size: int = 50000
     import os
     import uuid
     
+    print(f"Starting chunked processing. Chunk size: {chunk_size:,}")
     temp_file_path = None
     
     try:
@@ -455,22 +456,28 @@ def execute_query_chunked(sql: str, params: Dict = None, chunk_size: int = 50000
             "error": str(e)
         }
 
-def execute_query_with_limit_check(sql: str, params: Dict = None, max_rows: int = 1000000, progress_callback=None) -> Dict:
+def execute_query_with_limit_check(sql: str, params: Dict = None, max_rows: int = 500000, progress_callback=None) -> Dict:
     """Execute query with automatic limit checking and chunked processing for large datasets"""
     try:
+        print(f"Checking query size. Max rows threshold: {max_rows:,}")
+        
         # First, check if this is a count query
         if "COUNT(*)" in sql.upper():
+            print("Count query detected, executing directly")
             return execute_query(sql, params)
             
         # Check if query already has a limit
         if "ROWNUM" in sql.upper() or "FETCH FIRST" in sql.upper():
+            print("Query already has limit, executing directly")
             return execute_query(sql, params)
             
         # For potentially large queries, first get a count
         count_sql = f"SELECT COUNT(*) FROM ({sql})"
+        print(f"Getting row count with: {count_sql[:100]}...")
         count_result = execute_query(count_sql, params)
         
         if not count_result["success"]:
+            print(f"Count query failed: {count_result.get('message', 'Unknown error')}")
             return count_result
             
         row_count = 0
@@ -481,11 +488,15 @@ def execute_query_with_limit_check(sql: str, params: Dict = None, max_rows: int 
                     row_count = int(value)
                     break
         
+        print(f"Row count determined: {row_count:,} rows")
+        
         # Use chunked processing for very large datasets to prevent memory issues
         if row_count > max_rows:
-            print(f"Very large dataset detected ({row_count} rows), using chunked processing for memory efficiency.")
+            print(f"Very large dataset detected ({row_count:,} rows), using chunked processing for memory efficiency.")
+            print(f"Max rows threshold: {max_rows:,}")
             return execute_query_chunked(sql, params, progress_callback=progress_callback)
         else:
+            print(f"Normal dataset size ({row_count:,} rows), using standard query execution.")
             return execute_query(sql, params)
             
     except Exception as e:
@@ -498,8 +509,8 @@ def execute_query_with_limit_check(sql: str, params: Dict = None, max_rows: int 
 
 def execute_query_safe(sql: str, params: Dict = None, progress_callback=None) -> Dict:
     """Execute query with automatic memory safety checks - optimized for large datasets"""
-    # Use higher threshold for limit checking to accommodate normal 2M+ operations
-    return execute_query_with_limit_check(sql, params, max_rows=1000000, progress_callback=progress_callback)
+    # Use lower threshold to catch large datasets earlier
+    return execute_query_with_limit_check(sql, params, max_rows=500000, progress_callback=progress_callback)
 
 # Theory Management Functions
 def get_next_sc_campaign_id():

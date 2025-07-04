@@ -265,14 +265,25 @@ async def execute_database_query(request: QueryRequest, current_user: dict = Dep
         # Create progress callback if client_id provided
         progress_callback = None
         if request.client_id:
+            print(f"Setting up progress tracking for client: {request.client_id}")
             def progress_callback(progress_data):
-                # Schedule the async task in the main thread
-                asyncio.create_task(send_progress_update(request.client_id, progress_data))
+                try:
+                    print(f"Progress update: {progress_data}")
+                    # Schedule the async task in the main thread
+                    asyncio.create_task(send_progress_update(request.client_id, progress_data))
+                except Exception as e:
+                    print(f"Progress callback error: {e}")
+        else:
+            print("No client_id provided, progress tracking disabled")
         
         # Execute query with automatic chunking for large datasets
+        print(f"Executing query: {sql_query[:100]}...")
+        print(f"Query limit from request: {request_data.get('limit', 'None')}")
+        
         result = execute_query_safe(sql_query, progress_callback=progress_callback)
         
         execution_time = f"{(time.time() - start_time):.3f}s"
+        print(f"Query execution completed in {execution_time}. Success: {result.get('success', False)}")
         
         if result["success"]:
             # Add information for very large datasets
