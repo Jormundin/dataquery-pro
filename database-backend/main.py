@@ -265,8 +265,11 @@ async def send_progress_update(client_id: str, progress: dict):
     if client_id in active_connections:
         try:
             await active_connections[client_id].send_json(progress)
+            print(f"✅ Progress sent to client {client_id}: {progress['percent']:.1f}%")
         except Exception as e:
-            print(f"Error sending progress: {e}")
+            print(f"❌ Error sending progress to {client_id}: {e}")
+    else:
+        print(f"⚠️ Client {client_id} not in active connections. Active: {list(active_connections.keys())}")
 
 # Protected Query endpoints
 @app.post("/query/execute", response_model=QueryResultResponse)
@@ -279,29 +282,8 @@ async def execute_database_query(request: QueryRequest, current_user: dict = Dep
         request_data = request.dict()
         sql_query = query_builder.build_query_with_memory_check(request_data)
         
-        # Create progress callback if client_id provided
+        # No progress tracking - simplified
         progress_callback = None
-        if request.client_id:
-            print(f"Setting up progress tracking for client: {request.client_id}")
-            def progress_callback(progress_data):
-                try:
-                    print(f"📡 Sending progress via WebSocket: {progress_data}")
-                    # Use asyncio.run_coroutine_threadsafe for thread-safe async call
-                    import concurrent.futures
-                    loop = asyncio.get_event_loop()
-                    future = asyncio.run_coroutine_threadsafe(
-                        send_progress_update(request.client_id, progress_data), 
-                        loop
-                    )
-                    # Wait a short time for the result, but don't block too long
-                    try:
-                        future.result(timeout=0.1)
-                    except concurrent.futures.TimeoutError:
-                        print("⚠️ Progress update timed out (non-blocking)")
-                except Exception as e:
-                    print(f"❌ Progress callback error: {e}")
-        else:
-            print("No client_id provided, progress tracking disabled")
         
         # Execute query with automatic chunking for large datasets
         print(f"Executing query: {sql_query[:100]}...")

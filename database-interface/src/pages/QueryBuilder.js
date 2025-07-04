@@ -12,7 +12,6 @@ import {
   Target
 } from 'lucide-react';
 import { databaseAPI, queryBuilder } from '../services/api';
-import '../components/ProgressBar.css';
 
 const QueryBuilder = () => {
   const [selectedDatabase, setSelectedDatabase] = useState('');
@@ -32,11 +31,7 @@ const QueryBuilder = () => {
   const [isCountLoading, setIsCountLoading] = useState(false);
   const [countError, setCountError] = useState(null);
   
-  // Progress tracking state
-  const [queryProgress, setQueryProgress] = useState(null);
-  const [wsClient, setWsClient] = useState(null);
-  const [wsStatus, setWsStatus] = useState('disconnected'); // disconnected, connecting, connected
-  const [clientId] = useState(() => Math.random().toString(36).substr(2, 9));
+  // Removed progress tracking for simplicity
 
   // Pagination state for query results
   const [resultsCurrentPage, setResultsCurrentPage] = useState(1);
@@ -72,53 +67,6 @@ const QueryBuilder = () => {
 
   useEffect(() => {
     loadDatabases();
-    
-    // Setup WebSocket connection for progress updates
-    const wsUrl = process.env.REACT_APP_WS_URL || 'ws://localhost:8000';
-    const fullWsUrl = `${wsUrl}/ws/progress/${clientId}`;
-    console.log('Attempting WebSocket connection to:', fullWsUrl);
-    
-    setWsStatus('connecting');
-    const ws = new WebSocket(fullWsUrl);
-    
-    ws.onopen = () => {
-      console.log('✅ WebSocket connected for progress tracking');
-      setWsClient(ws);
-      setWsStatus('connected');
-    };
-    
-    ws.onmessage = (event) => {
-      const message = JSON.parse(event.data);
-      console.log('WebSocket message received:', message);
-      
-      if (message.type === 'connection_confirmed') {
-        console.log('✅ WebSocket connection confirmed');
-      } else if (message.type === 'ping') {
-        // Ignore ping messages
-      } else {
-        // Progress update
-        console.log('Progress update received:', message);
-        setQueryProgress(message);
-      }
-    };
-    
-    ws.onerror = (error) => {
-      console.error('❌ WebSocket error:', error);
-      console.error('WebSocket URL was:', fullWsUrl);
-      setWsStatus('disconnected');
-    };
-    
-    ws.onclose = (event) => {
-      console.log('WebSocket disconnected. Code:', event.code, 'Reason:', event.reason);
-      setWsClient(null);
-      setWsStatus('disconnected');
-    };
-    
-    return () => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.close();
-      }
-    };
   }, []);
 
   useEffect(() => {
@@ -244,26 +192,6 @@ const QueryBuilder = () => {
     setIsLoading(true);
     setError(null);
     setResultsCurrentPage(1); // Reset pagination on new query
-    setQueryProgress(null); // Reset progress
-    
-    console.log('Starting query execution with client_id:', clientId);
-    
-    // If WebSocket is not connected, simulate progress
-    let progressSimulation = null;
-    if (wsStatus !== 'connected' && limit > 100000) {
-      console.log('WebSocket not connected, simulating progress...');
-      let simulatedProgress = 0;
-      progressSimulation = setInterval(() => {
-        simulatedProgress += Math.random() * 10 + 5; // 5-15% increments
-        if (simulatedProgress < 90) {
-          setQueryProgress({
-            percent: simulatedProgress,
-            message: `Обрабатывается запрос... (имитация прогресса)`,
-            rows_processed: Math.floor((simulatedProgress / 100) * limit)
-          });
-        }
-      }, 1000);
-    }
     
     try {
       const queryData = {
@@ -273,8 +201,7 @@ const QueryBuilder = () => {
         filters: filters.filter(f => f.column && f.value),
         sort_by: sortBy,
         sort_order: sortOrder,
-        limit,
-        client_id: clientId // Add client ID for progress tracking
+        limit
       };
 
       const response = await databaseAPI.executeQuery(queryData);
@@ -360,7 +287,6 @@ const QueryBuilder = () => {
       }
     } finally {
       setIsLoading(false);
-      setQueryProgress(null); // Clear progress when done
     }
   };
 
@@ -1083,30 +1009,10 @@ const QueryBuilder = () => {
             {isLoading ? 'Выполняется...' : 'Выполнить запрос'}
           </button>
           
-          {/* Progress Bar */}
-          {queryProgress && (
-            <div className="progress-bar-container">
-              <div 
-                className="progress-bar-fill"
-                style={{ width: `${queryProgress.percent || 0}%` }}
-              />
-              <div className="progress-bar-text">
-                {queryProgress.message} ({Math.round(queryProgress.percent || 0)}%)
-              </div>
-            </div>
-          )}
-          
-          {/* Debug info */}
+          {/* Simple loading indicator */}
           {isLoading && (
-            <div className="progress-debug-info">
-              🔄 Загружается... {queryProgress ? `(${Math.round(queryProgress.percent || 0)}%)` : '(инициализация...)'}<br/>
-              <span className={`websocket-status ${wsStatus}`}>
-                WebSocket: {
-                  wsStatus === 'connected' ? '✅ Подключен' : 
-                  wsStatus === 'connecting' ? '🔄 Подключение...' : 
-                  '❌ Не подключен'
-                }
-              </span> | Client ID: {clientId}
+            <div style={{ padding: '1rem', textAlign: 'center', color: '#6b7280' }}>
+              🔄 Выполняется запрос...
             </div>
           )}
           
