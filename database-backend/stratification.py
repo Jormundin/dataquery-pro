@@ -251,8 +251,8 @@ def memory_efficient_stratification(df: pd.DataFrame, y: pd.Series, request: Str
     original_size = len(df)
     print(f"Starting stratification for {original_size} rows...")
     
-    # Check if we need to use sampling
-    if request.use_sampling and original_size > request.max_memory_rows:
+    # Force disable sampling to always use full dataset
+    if False and request.use_sampling and original_size > request.max_memory_rows:
         print(f"Large dataset detected ({original_size} rows). Using stratified sampling to {request.sample_size} rows...")
         
         # Create stratified sample
