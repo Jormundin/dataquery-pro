@@ -297,7 +297,21 @@ async def execute_database_query(request: QueryRequest, current_user: dict = Dep
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Ошибка выполнения запроса: {str(e)}")
+        # Log the full error for debugging
+        import traceback
+        print(f"Query execution error: {str(e)}")
+        traceback.print_exc()
+        
+        # Provide more specific error messages
+        error_message = str(e).lower()
+        if "timeout" in error_message:
+            raise HTTPException(status_code=504, detail="Запрос превысил максимальное время выполнения. Попробуйте уменьшить количество записей.")
+        elif "memory" in error_message or "out of memory" in error_message:
+            raise HTTPException(status_code=507, detail="Недостаточно памяти для обработки запроса. Попробуйте уменьшить количество записей.")
+        elif "connection" in error_message:
+            raise HTTPException(status_code=503, detail="Ошибка подключения к базе данных. Попробуйте позже.")
+        else:
+            raise HTTPException(status_code=500, detail=f"Ошибка выполнения запроса: {str(e)}")
 
 @app.post("/query/count")
 async def get_query_count(request: QueryRequest, current_user: dict = Depends(get_current_user_dependency)):

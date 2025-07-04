@@ -351,6 +351,9 @@ def execute_query_chunked(sql: str, params: Dict = None, chunk_size: int = 50000
         conn = get_connection_DSSB_APP()
         cursor = conn.cursor()
         
+        # Set array size for better performance with large datasets
+        cursor.arraysize = 10000
+        
         # Execute query
         if params:
             cursor.execute(sql, params)
@@ -360,17 +363,28 @@ def execute_query_chunked(sql: str, params: Dict = None, chunk_size: int = 50000
         # Get column names
         columns = [desc[0].lower() for desc in cursor.description] if cursor.description else []
         
+        # For very large datasets (>2M), limit the actual data returned to frontend
+        # while still reporting the full count
+        max_rows_to_return = 100000  # Return max 100K rows to frontend
+        
         # Fetch results in chunks
         data = []
         total_rows = 0
+        rows_returned = 0
         
         while True:
             chunk = cursor.fetchmany(chunk_size)
             if not chunk:
                 break
                 
+            # Only process rows up to max_rows_to_return for frontend
+            rows_to_process = chunk if rows_returned < max_rows_to_return else []
+            if rows_returned < max_rows_to_return and rows_returned + len(chunk) > max_rows_to_return:
+                # Partial chunk to reach exactly max_rows_to_return
+                rows_to_process = chunk[:max_rows_to_return - rows_returned]
+            
             # Convert chunk to list of dictionaries
-            for row in chunk:
+            for row in rows_to_process:
                 row_dict = {}
                 for i, value in enumerate(row):
                     # Handle different Oracle data types
@@ -380,29 +394,37 @@ def execute_query_chunked(sql: str, params: Dict = None, chunk_size: int = 50000
                         value = value.isoformat()
                     row_dict[columns[i]] = value
                 data.append(row_dict)
+                rows_returned += 1
             
             total_rows += len(chunk)
             
             # Progress indicator for very large datasets
-            if total_rows > 2000000 and total_rows % 500000 == 0:
-                print(f"Progress: {total_rows} rows processed so far...")
+            if total_rows > 1000000 and total_rows % 500000 == 0:
+                print(f"Progress: {total_rows:,} rows processed so far...")
         
         cursor.close()
         conn.close()
+        
+        message = f"Запрос выполнен успешно ({total_rows:,} записей)"
+        if total_rows > max_rows_to_return:
+            message += f". Показаны первые {max_rows_to_return:,} записей из {total_rows:,} для оптимизации производительности"
         
         return {
             "success": True,
             "columns": columns,
             "data": data,
             "row_count": total_rows,
-            "message": f"Запрос выполнен успешно ({total_rows} записей)"
+            "rows_returned": rows_returned,
+            "message": message
         }
         
     except Exception as e:
         print(f"Chunked query execution error: {e}")
+        import traceback
+        traceback.print_exc()
         return {
             "success": False,
-            "message": f"Database query failed: {str(e)}",
+            "message": f"Ошибка выполнения запроса для большого набора данных: {str(e)}",
             "error": str(e)
         }
 

@@ -219,7 +219,30 @@ const QueryBuilder = () => {
       }
     } catch (err) {
       console.error('Query execution error:', err);
-      const errorMessage = err.response?.data?.detail || err.message || 'Ошибка выполнения запроса';
+      
+      // Handle different error types
+      let errorMessage = 'Ошибка выполнения запроса';
+      
+      if (err.response) {
+        // Server responded with error
+        const status = err.response.status;
+        const detail = err.response.data?.detail;
+        
+        if (status === 504) {
+          errorMessage = detail || 'Запрос превысил максимальное время выполнения. Попробуйте уменьшить количество записей.';
+        } else if (status === 507) {
+          errorMessage = detail || 'Недостаточно памяти для обработки запроса. Попробуйте уменьшить количество записей.';
+        } else if (status === 503) {
+          errorMessage = detail || 'Ошибка подключения к базе данных. Попробуйте позже.';
+        } else {
+          errorMessage = detail || err.response.data?.message || errorMessage;
+        }
+      } else if (err.code === 'ECONNABORTED') {
+        errorMessage = 'Время ожидания запроса истекло. Попробуйте уменьшить количество записей.';
+      } else {
+        errorMessage = err.message || errorMessage;
+      }
+      
       setError(errorMessage);
       
       // Mock data for development/testing
