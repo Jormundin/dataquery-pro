@@ -35,30 +35,64 @@ LDAP_CONFIG = {
     'timeout': 10,                            
 }
 
-# Permitted users - hardcoded as requested
-PERMITTED_USERS = {
-    '00058215': {
-        'name': 'Nadir',
-        'role': 'admin',
-        'permissions': ['read', 'write', 'admin']
-    },
-    # Add more users here - uncomment and modify these examples:
-    # '00012345': {
-    #     'name': 'John Doe',
-    #     'role': 'user', 
-    #     'permissions': ['read']
-    # },
-    # '00067890': {
-    #     'name': 'Jane Smith',
-    #     'role': 'analyst',
-    #     'permissions': ['read', 'write']
-    # },
-    # '00054321': {
-    #     'name': 'Bob Johnson',
-    #     'role': 'admin',
-    #     'permissions': ['read', 'write', 'admin']
-    # }
-}
+def parse_permitted_users():
+    """
+    Parse permitted users from environment variables
+    Format: USER_ID1:NAME1:ROLE1:PERMISSION1,PERMISSION2;USER_ID2:NAME2:ROLE2:PERMISSION1
+    Example: 00058215:Nadir:admin:read,write,admin;00012345:John:user:read
+    """
+    # Default permitted users (fallback)
+    default_users = {
+        '00058215': {
+            'name': 'Nadir',
+            'role': 'admin',
+            'permissions': ['read', 'write', 'admin']
+        },
+    }
+    
+    # Try to read from environment variable
+    users_env = os.getenv('PERMITTED_USERS', '')
+    
+    if not users_env:
+        logging.info("No PERMITTED_USERS environment variable found, using default users")
+        return default_users
+    
+    try:
+        permitted_users = {}
+        user_entries = users_env.split(';')
+        
+        for entry in user_entries:
+            if not entry.strip():
+                continue
+                
+            parts = entry.strip().split(':')
+            if len(parts) != 4:
+                logging.warning(f"Invalid user entry format: {entry}. Expected format: USER_ID:NAME:ROLE:PERMISSIONS")
+                continue
+            
+            user_id, name, role, permissions_str = parts
+            permissions = [p.strip() for p in permissions_str.split(',') if p.strip()]
+            
+            permitted_users[user_id] = {
+                'name': name,
+                'role': role,
+                'permissions': permissions
+            }
+        
+        if permitted_users:
+            logging.info(f"Loaded {len(permitted_users)} permitted users from environment variable")
+            return permitted_users
+        else:
+            logging.warning("No valid users found in PERMITTED_USERS environment variable, using defaults")
+            return default_users
+            
+    except Exception as e:
+        logging.error(f"Error parsing PERMITTED_USERS environment variable: {e}")
+        logging.info("Using default permitted users")
+        return default_users
+
+# Load permitted users from environment or use defaults
+PERMITTED_USERS = parse_permitted_users()
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 

@@ -66,34 +66,126 @@ sudo yum install oracle-instantclient-devel
 
 ### 3. Настройка переменных окружения
 
-Создайте файл `.env` в корневой директории проекта:
-
+**🚀 Быстрая настройка:**
 ```bash
-# Скопируйте пример
-cp env_example.txt .env
+# Копируйте готовый шаблон конфигурации
+cp config_template.env .env
+
+# Отредактируйте файл со своими значениями
+nano .env
 ```
 
-Отредактируйте `.env` файл:
+**📖 Подробная инструкция по настройке:** [ENVIRONMENT_SETUP.md](ENVIRONMENT_SETUP.md)
+
+#### Обязательные настройки:
 
 ```env
-# Oracle Database Configuration
+# Разрешенные пользователи (ТРЕБУЕТСЯ)
+# Формат: USER_ID:NAME:ROLE:PERMISSIONS
+PERMITTED_USERS=00058215:Nadir:admin:read,write,admin
+
+# Email уведомления (ТРЕБУЕТСЯ) 
+# Замените на ваши реальные email адреса
+CAMPAIGN_NOTIFICATION_EMAILS=nadir@halykbank.kz,admin@halykbank.kz,analyst@halykbank.kz
+
+# Подключение к основной базе данных (ТРЕБУЕТСЯ)
 ORACLE_HOST=your-oracle-server.company.com
 ORACLE_PORT=1521
-ORACLE_SID=PROD
+ORACLE_SID=DSSB_APP
 ORACLE_USER=your_username
 ORACLE_PASSWORD=your_password
+```
 
-# Application Configuration
+#### Дополнительные настройки:
+
+```env
+# Дополнительная база данных SPSS (ОПЦИОНАЛЬНО)
+SPSS_ORACLE_HOST=your-spss-server.company.com
+SPSS_ORACLE_PORT=1521
+SPSS_ORACLE_SID=SPSS
+SPSS_ORACLE_USER=your_spss_username
+SPSS_ORACLE_PASSWORD=your_spss_password
+
+# Настройки приложения (ОПЦИОНАЛЬНО - есть умолчания)
 APP_HOST=0.0.0.0
 APP_PORT=8000
-DEBUG=True
+JWT_SECRET_KEY=your-very-secure-secret-key
+JWT_ACCESS_TOKEN_EXPIRE_MINUTES=480
 
-# Security
-SECRET_KEY=your-very-secure-secret-key-change-in-production
-ACCESS_TOKEN_EXPIRE_MINUTES=30
+# Email SMTP (ОПЦИОНАЛЬНО - есть рабочие умолчания)
+EMAIL_SENDER=your-sender@company.com
+SMTP_SERVER=mail.company.com
+SMTP_PORT=587
+SMTP_USERNAME=your-smtp-username
+SMTP_PASSWORD=your-smtp-password
+```
 
-# CORS Origins (comma-separated)
-ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
+#### 💡 Преимущества использования переменных окружения:
+
+- ✅ **Персистентность**: Ваши настройки сохраняются после обновлений кода
+- ✅ **Безопасность**: Чувствительные данные не попадают в репозиторий  
+- ✅ **Гибкость**: Легкое добавление новых пользователей и email адресов
+- ✅ **Команда**: Каждый разработчик может иметь свои настройки
+
+#### 👥 Добавление нового пользователя:
+
+```bash
+# Было:
+PERMITTED_USERS=00058215:Nadir:admin:read,write,admin
+
+# Стало (добавили John с правами пользователя):
+PERMITTED_USERS=00058215:Nadir:admin:read,write,admin;00012345:John:user:read
+```
+
+#### 📧 Обновление списка email для уведомлений:
+
+```bash
+# Было:
+CAMPAIGN_NOTIFICATION_EMAILS=old@company.com
+
+# Стало:
+CAMPAIGN_NOTIFICATION_EMAILS=new@company.com,manager@company.com,analyst@company.com
+```
+
+#### 🧪 Проверка конфигурации:
+
+После настройки `.env` файла, проверьте правильность конфигурации:
+
+```bash
+python test_env_config.py
+```
+
+Скрипт проверит:
+- ✅ Корректность формата пользователей
+- ✅ Валидность email адресов
+- ✅ Наличие обязательных настроек базы данных
+- ✅ Опциональные настройки SMTP
+
+**Пример успешного результата:**
+```
+🧪 SoftCollection Environment Configuration Test
+==================================================
+✅ Found and loaded .env file
+
+📋 Testing PERMITTED_USERS configuration...
+   ✅ User: 00058215 (Nadir) - Role: admin - Permissions: read, write, admin
+✅ Successfully parsed 1 user(s)
+
+📧 Testing email configuration...
+   ✅ Email: nadir@halykbank.kz
+   ✅ Email: admin@halykbank.kz
+✅ Successfully parsed 2 email address(es)
+
+==================================================
+📊 Configuration Test Summary:
+   ✅ Environment file (.env)
+   ✅ Permitted users
+   ✅ Email notifications
+   ✅ Database connection
+   ✅ SMTP configuration
+
+🎉 Configuration looks good! You can start the application.
+   Run: python main.py
 ```
 
 ## 🚀 Запуск

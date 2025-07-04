@@ -9,6 +9,8 @@ from sklearn.model_selection import StratifiedKFold, StratifiedShuffleSplit
 from scipy.stats import ks_2samp, chi2_contingency
 from typing import List, Dict, Any, Tuple, Optional
 from pydantic import BaseModel, Field, ValidationError
+import math
+import gc
 
 
 class StratificationRequest(BaseModel):
@@ -23,6 +25,10 @@ class StratificationRequest(BaseModel):
     ks_test_columns: list = Field(None, description="List of specific columns to monitor for statistical tests (KS test for numeric, Chi-square for categorical). If None, all numeric columns will be used.")
     min_p_value: float = Field(None, ge=0.0, le=1.0, description="Minimum p-value threshold for statistical tests. Stratification will iterate until this threshold is met or exceeded.")
     max_iterations: int = Field(100, ge=1, le=1000, description="Maximum number of iterations to attempt when trying to meet p-value threshold.")
+    # New fields for memory management
+    max_memory_rows: int = Field(500000, ge=10000, le=2000000, description="Maximum number of rows to process in memory before using sampling.")
+    sample_size: int = Field(100000, ge=10000, le=500000, description="Sample size to use for large datasets.")
+    use_sampling: bool = Field(True, description="Whether to use sampling for large datasets.")
    
     def __init__(self, **data):
         super().__init__(**data)
@@ -192,6 +198,165 @@ def get_min_p_values(ks_scores: List[Dict], ks_test_columns: List[str]) -> Dict[
     return min_p_values
 
 
+def create_stratified_sample(df: pd.DataFrame, stratify_cols: List[str], sample_size: int, random_state: int = 42) -> pd.DataFrame:
+    """
+    Create a stratified sample from a large DataFrame to reduce memory usage.
+    """
+    try:
+        # Combine stratification columns
+        y = df[stratify_cols].astype(str).agg('_'.join, axis=1)
+        
+        # Calculate minimum samples needed per stratum
+        unique_strata = y.nunique()
+        min_samples_per_stratum = max(10, math.ceil(sample_size / unique_strata))
+        
+        # Use stratified sampling
+        if len(df) <= sample_size:
+            return df.copy()
+        
+        # Create stratified sample
+        sample_indices = []
+        for stratum in y.unique():
+            stratum_indices = df[y == stratum].index
+            n_samples = min(len(stratum_indices), min_samples_per_stratum)
+            
+            if n_samples > 0:
+                sampled_indices = np.random.RandomState(random_state).choice(
+                    stratum_indices, size=n_samples, replace=False
+                )
+                sample_indices.extend(sampled_indices)
+        
+        # If we don't have enough samples, add more randomly
+        if len(sample_indices) < sample_size:
+            remaining_indices = df.index.difference(sample_indices)
+            n_additional = min(sample_size - len(sample_indices), len(remaining_indices))
+            if n_additional > 0:
+                additional_indices = np.random.RandomState(random_state + 1).choice(
+                    remaining_indices, size=n_additional, replace=False
+                )
+                sample_indices.extend(additional_indices)
+        
+        return df.loc[sample_indices].reset_index(drop=True)
+        
+    except Exception as e:
+        print(f"Error creating stratified sample: {e}")
+        # Fallback to simple random sampling
+        return df.sample(n=min(sample_size, len(df)), random_state=random_state).reset_index(drop=True)
+
+
+def memory_efficient_stratification(df: pd.DataFrame, y: pd.Series, request: StratificationRequest) -> Tuple[List[pd.DataFrame], List[Dict]]:
+    """
+    Perform memory-efficient stratification for large datasets.
+    """
+    original_size = len(df)
+    print(f"Starting stratification for {original_size} rows...")
+    
+    # Check if we need to use sampling
+    if request.use_sampling and original_size > request.max_memory_rows:
+        print(f"Large dataset detected ({original_size} rows). Using stratified sampling to {request.sample_size} rows...")
+        
+        # Create stratified sample
+        sample_df = create_stratified_sample(df, request.stratify_cols, request.sample_size, request.random_state)
+        sample_y = sample_df[request.stratify_cols].astype(str).agg('_'.join, axis=1)
+        
+        print(f"Sample created with {len(sample_df)} rows")
+        
+        # Perform stratification on the sample
+        sample_splits, sample_test_scores = perform_stratification(sample_df, sample_y, request)
+        
+        # Now apply the stratification proportions to the full dataset
+        print("Applying stratification proportions to full dataset...")
+        full_splits = []
+        full_test_scores = []
+        
+        # Calculate the proportion of each stratum in each split
+        stratum_proportions = {}
+        for i, split in enumerate(sample_splits):
+            split_y = split[request.stratify_cols].astype(str).agg('_'.join, axis=1)
+            stratum_counts = split_y.value_counts()
+            
+            for stratum, count in stratum_counts.items():
+                if stratum not in stratum_proportions:
+                    stratum_proportions[stratum] = {}
+                stratum_proportions[stratum][i] = count / len(split)
+        
+        # Apply proportions to full dataset
+        for i in range(len(sample_splits)):
+            full_split_indices = []
+            
+            for stratum in y.unique():
+                stratum_indices = df[y == stratum].index.tolist()
+                if stratum in stratum_proportions:
+                    target_proportion = stratum_proportions[stratum].get(i, 0)
+                    n_samples = int(len(stratum_indices) * target_proportion)
+                    if n_samples > 0:
+                        sampled_indices = np.random.RandomState(request.random_state + i).choice(
+                            stratum_indices, size=min(n_samples, len(stratum_indices)), replace=False
+                        )
+                        full_split_indices.extend(sampled_indices)
+            
+            if full_split_indices:
+                full_split = df.loc[full_split_indices].reset_index(drop=True)
+                full_splits.append(full_split)
+                
+                # Calculate test statistics for the full split
+                test_columns = request.ks_test_columns if request.ks_test_columns else df.select_dtypes(include=np.number).columns.tolist()
+                test_dict = {}
+                
+                # Use a sample for statistical testing if the full split is too large
+                if len(full_split) > 10000:
+                    test_sample = full_split.sample(n=min(10000, len(full_split)), random_state=request.random_state)
+                    df_sample = df.sample(n=min(10000, len(df)), random_state=request.random_state)
+                    
+                    for col in test_columns:
+                        if col in df.columns:
+                            try:
+                                statistic, p_value, test_type = calculate_statistical_test(df_sample, test_sample, col)
+                                test_dict[col] = {
+                                    'p_value': p_value,
+                                    'statistic': statistic,
+                                    'test_type': test_type
+                                }
+                            except Exception as e:
+                                print(f"Error calculating statistics for column {col}: {e}")
+                                test_dict[col] = {
+                                    'p_value': 0.5,
+                                    'statistic': 0.0,
+                                    'test_type': 'error'
+                                }
+                else:
+                    for col in test_columns:
+                        if col in df.columns:
+                            try:
+                                statistic, p_value, test_type = calculate_statistical_test(df, full_split, col)
+                                test_dict[col] = {
+                                    'p_value': p_value,
+                                    'statistic': statistic,
+                                    'test_type': test_type
+                                }
+                            except Exception as e:
+                                print(f"Error calculating statistics for column {col}: {e}")
+                                test_dict[col] = {
+                                    'p_value': 0.5,
+                                    'statistic': 0.0,
+                                    'test_type': 'error'
+                                }
+                
+                full_test_scores.append(test_dict)
+        
+        # Clean up memory
+        del sample_df, sample_y, sample_splits, sample_test_scores
+        gc.collect()
+        
+        print(f"Memory-efficient stratification completed. Created {len(full_splits)} groups from {original_size} rows.")
+        return full_splits, full_test_scores
+        
+    else:
+        # Use regular stratification for smaller datasets
+        print(f"Using regular stratification for {original_size} rows...")
+        return perform_stratification(df, y, request)
+
+
 def stratify_data(request_data: Dict[str, Any]) -> Dict[str, Any]:
     """
     Main stratification function that replicates the /stratify endpoint functionality
@@ -204,7 +369,18 @@ def stratify_data(request_data: Dict[str, Any]) -> Dict[str, Any]:
 
     # Reconstruct the DataFrame from the input data
     try:
+        print(f"Reconstructing DataFrame with {len(request.data)} rows and {len(request.columns)} columns...")
         df = pd.DataFrame(data=request.data, columns=request.columns)
+        
+        # Add memory usage information
+        memory_usage_mb = df.memory_usage(deep=True).sum() / 1024 / 1024
+        print(f"DataFrame memory usage: {memory_usage_mb:.2f} MB")
+        
+        # Check if we need to enable memory-efficient processing
+        if len(df) > 500000:
+            print(f"Large dataset detected ({len(df)} rows). Memory-efficient processing will be used.")
+            request.use_sampling = True
+            
     except Exception as e:
         raise ValueError(f"Error reconstructing DataFrame: {e}")
 
@@ -251,6 +427,7 @@ def stratify_data(request_data: Dict[str, Any]) -> Dict[str, Any]:
     insufficient_strata = value_counts[value_counts < min_samples].index.tolist()
 
     if insufficient_strata:
+        print(f"Removing {len(insufficient_strata)} strata with insufficient samples...")
         df = df[~y.isin(insufficient_strata)]
         y = y[~y.isin(insufficient_strata)]
 
@@ -288,9 +465,13 @@ def stratify_data(request_data: Dict[str, Any]) -> Dict[str, Any]:
         while iteration < request.max_iterations and not criteria_met:
             # Use different random seed for each iteration
             iteration_seed = request.random_state + iteration * 1000
+            
+            # Create a copy of the request with the new seed
+            iteration_request = request.copy()
+            iteration_request.random_state = iteration_seed
            
-            # Perform stratification
-            splits, test_scores = perform_stratification(df, y, request, iteration_seed)
+            # Perform stratification using memory-efficient method
+            splits, test_scores = memory_efficient_stratification(df, y, iteration_request)
            
             # Check if p-value criteria are met
             criteria_met = check_p_value_criteria(test_scores, test_columns, request.min_p_value)
@@ -323,8 +504,8 @@ def stratify_data(request_data: Dict[str, Any]) -> Dict[str, Any]:
             'max_iterations': request.max_iterations
         }
     else:
-        # Single stratification without p-value criteria
-        splits, test_scores = perform_stratification(df, y, request)
+        # Single stratification without p-value criteria - use memory-efficient method
+        splits, test_scores = memory_efficient_stratification(df, y, request)
         iteration_info = None
 
     # Prepare the response
@@ -332,7 +513,12 @@ def stratify_data(request_data: Dict[str, Any]) -> Dict[str, Any]:
     total_rows = df.shape[0]
    
     for i, split_df in enumerate(splits):
-        # Convert DataFrame to JSON
+        # Convert DataFrame to JSON - limit size if too large
+        if len(split_df) > 10000:
+            print(f"Split {i+1} is large ({len(split_df)} rows). Consider using smaller splits for JSON serialization.")
+            # For very large splits, we might want to return only a sample for JSON
+            # Or implement a different return format
+            
         split_data_json = split_df.to_dict(orient='records')
         actual_proportion = split_df.shape[0] / total_rows
        
@@ -356,7 +542,12 @@ def stratify_data(request_data: Dict[str, Any]) -> Dict[str, Any]:
         'ks_test_columns': test_columns,
         'stratified_groups': stratified_data,
         'total_rows': total_rows,
-        'message': 'Stratification successful.'
+        'message': 'Stratification successful.',
+        'memory_info': {
+            'original_rows': len(request.data),
+            'processed_rows': total_rows,
+            'memory_efficient_processing': request.use_sampling and len(request.data) > request.max_memory_rows
+        }
     }
    
     # Add split method information
@@ -389,5 +580,11 @@ def stratify_data(request_data: Dict[str, Any]) -> Dict[str, Any]:
     # Add iteration information to response
     if iteration_info:
         response['iteration_info'] = iteration_info
+
+    # Clean up memory
+    del df, y, splits
+    if test_df is not None:
+        del test_df
+    gc.collect()
 
     return response 

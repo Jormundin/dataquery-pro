@@ -47,22 +47,40 @@ SMTP_PORT = int(os.getenv('SMTP_PORT', str(SMTP_PORT)))
 SMTP_USERNAME = os.getenv('SMTP_USERNAME', SMTP_USERNAME)
 SMTP_PASSWORD = os.getenv('SMTP_PASSWORD', SMTP_PASSWORD)
 
-# HARDCODED CAMPAIGN NOTIFICATION RECIPIENTS
-CAMPAIGN_NOTIFICATION_EMAILS = [
-    'manager@example.com',  # Replace with actual manager email
-    'admin@example.com',    # Replace with actual admin email
-    'analyst@example.com'   # Replace with actual analyst email
-]
-
-# Override with environment variables if configured
 def parse_email_list(env_var_name, default_list=None):
-    """Parse comma-separated email list from environment variable"""
+    """
+    Parse comma-separated email list from environment variable
+    
+    Args:
+        env_var_name: Name of environment variable
+        default_list: Default list to use if env var is not set
+    
+    Returns:
+        List of email addresses
+    """
     email_string = os.getenv(env_var_name, '')
     if email_string:
-        return [email.strip() for email in email_string.split(',') if email.strip()]
-    return default_list or []
+        emails = [email.strip() for email in email_string.split(',') if email.strip()]
+        if emails:
+            logger.info(f"Loaded {len(emails)} email addresses from {env_var_name}: {', '.join(emails)}")
+            return emails
+    
+    if default_list:
+        logger.info(f"No {env_var_name} environment variable found, using default emails: {', '.join(default_list)}")
+        return default_list
+    else:
+        logger.warning(f"No {env_var_name} environment variable found and no defaults provided")
+        return []
 
-CAMPAIGN_NOTIFICATION_EMAILS = parse_email_list('CAMPAIGN_NOTIFICATION_EMAILS', CAMPAIGN_NOTIFICATION_EMAILS)
+# Default notification emails (fallback values)
+DEFAULT_NOTIFICATION_EMAILS = [
+    'nadir.example@halykbank.kz',  # Replace with actual email
+    'admin.example@halykbank.kz',  # Replace with actual email
+    'analyst.example@halykbank.kz' # Replace with actual email
+]
+
+# Load campaign notification emails from environment or use defaults
+CAMPAIGN_NOTIFICATION_EMAILS = parse_email_list('CAMPAIGN_NOTIFICATION_EMAILS', DEFAULT_NOTIFICATION_EMAILS)
 
 # =============================================================================
 # CORE EMAIL FUNCTIONS

@@ -39,6 +39,10 @@ SPSS_ORACLE_PASSWORD=your_spss_password
 APP_HOST=0.0.0.0
 APP_PORT=8000
 
+# =====================================================
+# Authentication & User Management
+# =====================================================
+
 # Authentication (if using JWT)
 JWT_SECRET_KEY=your_very_secure_secret_key_here
 JWT_ALGORITHM=HS256
@@ -50,6 +54,17 @@ LDAP_PORT=389
 LDAP_BASE_DN=dc=company,dc=com
 LDAP_BIND_USER=cn=service-account,ou=users,dc=company,dc=com
 LDAP_BIND_PASSWORD=service_account_password
+
+# Permitted Users Configuration
+# Format: USER_ID1:NAME1:ROLE1:PERMISSION1,PERMISSION2;USER_ID2:NAME2:ROLE2:PERMISSION1
+# Roles: admin, user, analyst
+# Permissions: read, write, admin
+# 
+# Example with multiple users:
+# PERMITTED_USERS=00058215:Nadir:admin:read,write,admin;00012345:John:user:read;00067890:Alice:analyst:read,write
+#
+# If not set, defaults to:
+# PERMITTED_USERS=00058215:Nadir:admin:read,write,admin
 
 # Application Settings
 DEBUG=false
@@ -69,9 +84,14 @@ LOG_LEVEL=INFO
 # SMTP_USERNAME=your-smtp-username
 # SMTP_PASSWORD=your-smtp-password
 
-# Campaign Notification Recipients (optional override)
+# Campaign Notification Recipients
 # Comma-separated list of email addresses to receive campaign notifications
+# Examples:
+# CAMPAIGN_NOTIFICATION_EMAILS=nadir@halykbank.kz,admin@halykbank.kz,analyst@halykbank.kz
 # CAMPAIGN_NOTIFICATION_EMAILS=manager@company.com,admin@company.com,analyst@company.com
+#
+# If not set, defaults to example emails that should be replaced:
+# CAMPAIGN_NOTIFICATION_EMAILS=nadir.example@halykbank.kz,admin.example@halykbank.kz,analyst.example@halykbank.kz
 
 # =====================================================
 # Database Connection Testing

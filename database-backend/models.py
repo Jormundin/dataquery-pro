@@ -12,6 +12,29 @@ class QueryRequest(BaseModel):
     sort_order: Optional[str] = "ASC"
     limit: Optional[int] = 100
 
+class QueryRequestLarge(BaseModel):
+    """Extended query request for large datasets with memory management options"""
+    database_id: str
+    table: str
+    columns: Optional[List[str]] = None
+    filters: Optional[List[Dict[str, Any]]] = None
+    sort_by: Optional[str] = None
+    sort_order: Optional[str] = "ASC"
+    limit: Optional[int] = 100
+    # Memory management options
+    enable_chunking: Optional[bool] = True
+    chunk_size: Optional[int] = 5000
+    max_memory_rows: Optional[int] = 50000
+
+class StratificationRequest(BaseModel):
+    """Request model for stratification with memory management"""
+    query_data: Dict[str, Any]
+    stratification_config: Dict[str, Any]
+    # Memory management settings
+    max_memory_rows: Optional[int] = 500000
+    sample_size: Optional[int] = 100000
+    use_sampling: Optional[bool] = True
+
 class ConnectionTestRequest(BaseModel):
     host: Optional[str] = None
     port: Optional[int] = None
@@ -70,6 +93,14 @@ class ColumnResponse(BaseModel):
     nullable: Optional[bool] = True
     options: Optional[List[str]] = None
 
+class MemoryInfo(BaseModel):
+    """Memory usage information for large datasets"""
+    total_rows: int
+    memory_efficient_processing: bool
+    chunked_processing: bool
+    estimated_memory_mb: Optional[float] = None
+    warnings: Optional[List[str]] = None
+
 class QueryResultResponse(BaseModel):
     success: bool
     columns: Optional[List[str]] = None
@@ -78,6 +109,7 @@ class QueryResultResponse(BaseModel):
     message: Optional[str] = None
     error: Optional[str] = None
     execution_time: Optional[str] = None
+    memory_info: Optional[MemoryInfo] = None
 
 class QueryHistoryResponse(BaseModel):
     id: int
@@ -126,11 +158,11 @@ class DatabaseSettings(BaseModel):
     database: str
     username: str
     ssl: bool = False
-    connection_timeout: int = 30
+    connection_timeout: int = 300
 
 class APISettings(BaseModel):
     base_url: str
-    timeout: int = 30000
+    timeout: int = 300000
     retries: int = 3
     api_key: Optional[str] = None
 
@@ -175,4 +207,15 @@ class TheoryCreateResponse(BaseModel):
     success: bool
     message: str
     theory_id: Optional[str] = None  # Changed from int to str to support decimal IDs
-    users_added: Optional[int] = None 
+    users_added: Optional[int] = None
+
+class StratificationResponse(BaseModel):
+    """Response model for stratification operations"""
+    success: bool
+    n_splits: int
+    stratify_cols: List[str]
+    stratified_groups: List[Dict[str, Any]]
+    total_rows: int
+    message: str
+    memory_info: Optional[MemoryInfo] = None
+    iteration_info: Optional[Dict[str, Any]] = None 

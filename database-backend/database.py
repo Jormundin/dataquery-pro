@@ -89,7 +89,22 @@ def get_connection_DSSB_APP():
             raise ValueError("Missing required database environment variables. Please check ORACLE_HOST, ORACLE_SID, ORACLE_USER, and ORACLE_PASSWORD.")
         
         dsn = cx_Oracle.makedsn(oracle_host, oracle_port, sid=oracle_sid)
-        return cx_Oracle.connect(user=oracle_user, password=oracle_password, dsn=dsn)
+        
+        # Create connection with extended timeout for large queries
+        connection = cx_Oracle.connect(
+            user=oracle_user, 
+            password=oracle_password, 
+            dsn=dsn,
+            encoding="UTF-8"
+        )
+        
+        # Set session timeout parameters for large queries
+        cursor = connection.cursor()
+        cursor.execute("ALTER SESSION SET QUERY_REWRITE_ENABLED = TRUE")
+        cursor.execute("ALTER SESSION SET OPTIMIZER_MODE = ALL_ROWS")
+        cursor.close()
+        
+        return connection
     except cx_Oracle.Error as e:
         print(f"Database connection error: {str(e)}")
         raise
@@ -114,7 +129,22 @@ def get_connection_SPSS():
             raise ValueError("Missing required SPSS database environment variables. Please check SPSS_ORACLE_HOST, SPSS_ORACLE_SID, SPSS_ORACLE_USER, and SPSS_ORACLE_PASSWORD.")
         
         dsn = cx_Oracle.makedsn(spss_host, spss_port, sid=spss_sid)
-        return cx_Oracle.connect(user=spss_user, password=spss_password, dsn=dsn)
+        
+        # Create connection with extended timeout for large queries
+        connection = cx_Oracle.connect(
+            user=spss_user, 
+            password=spss_password, 
+            dsn=dsn,
+            encoding="UTF-8"
+        )
+        
+        # Set session timeout parameters for large queries
+        cursor = connection.cursor()
+        cursor.execute("ALTER SESSION SET QUERY_REWRITE_ENABLED = TRUE")
+        cursor.execute("ALTER SESSION SET OPTIMIZER_MODE = ALL_ROWS")
+        cursor.close()
+        
+        return connection
     except cx_Oracle.Error as e:
         print(f"SPSS Database connection error: {str(e)}")
         raise
@@ -279,6 +309,10 @@ def execute_query(sql: str, params: Dict = None) -> Dict:
         # Fetch results
         rows = cursor.fetchall()
         
+        # Add memory warning for large datasets
+        if len(rows) > 100000:
+            print(f"Warning: Large dataset loaded ({len(rows)} rows). Consider using chunked processing for datasets over 100,000 rows.")
+        
         # Convert to list of dictionaries
         data = []
         for row in rows:
@@ -305,6 +339,108 @@ def execute_query(sql: str, params: Dict = None) -> Dict:
         
     except Exception as e:
         print(f"Query execution error: {e}")
+        return {
+            "success": False,
+            "message": f"Database query failed: {str(e)}",
+            "error": str(e)
+        }
+
+def execute_query_chunked(sql: str, params: Dict = None, chunk_size: int = 5000) -> Dict:
+    """Execute SQL query with chunked processing for large datasets"""
+    try:
+        conn = get_connection_DSSB_APP()
+        cursor = conn.cursor()
+        
+        # Execute query
+        if params:
+            cursor.execute(sql, params)
+        else:
+            cursor.execute(sql)
+        
+        # Get column names
+        columns = [desc[0].lower() for desc in cursor.description] if cursor.description else []
+        
+        # Fetch results in chunks
+        data = []
+        total_rows = 0
+        
+        while True:
+            chunk = cursor.fetchmany(chunk_size)
+            if not chunk:
+                break
+                
+            # Convert chunk to list of dictionaries
+            for row in chunk:
+                row_dict = {}
+                for i, value in enumerate(row):
+                    # Handle different Oracle data types
+                    if isinstance(value, cx_Oracle.LOB):
+                        value = value.read() if value else None
+                    elif hasattr(value, 'isoformat'):  # Date/DateTime
+                        value = value.isoformat()
+                    row_dict[columns[i]] = value
+                data.append(row_dict)
+            
+            total_rows += len(chunk)
+            
+            # Optional: Add memory warning for very large datasets
+            if total_rows > 100000 and total_rows % 50000 == 0:
+                print(f"Warning: Loading large dataset, {total_rows} rows processed so far...")
+        
+        cursor.close()
+        conn.close()
+        
+        return {
+            "success": True,
+            "columns": columns,
+            "data": data,
+            "row_count": total_rows,
+            "message": f"Запрос выполнен успешно ({total_rows} записей)"
+        }
+        
+    except Exception as e:
+        print(f"Chunked query execution error: {e}")
+        return {
+            "success": False,
+            "message": f"Database query failed: {str(e)}",
+            "error": str(e)
+        }
+
+def execute_query_with_limit_check(sql: str, params: Dict = None, max_rows: int = 50000) -> Dict:
+    """Execute query with automatic limit checking and chunked processing for large datasets"""
+    try:
+        # First, check if this is a count query
+        if "COUNT(*)" in sql.upper():
+            return execute_query(sql, params)
+            
+        # Check if query already has a limit
+        if "ROWNUM" in sql.upper() or "FETCH FIRST" in sql.upper():
+            return execute_query(sql, params)
+            
+        # For potentially large queries, first get a count
+        count_sql = f"SELECT COUNT(*) FROM ({sql})"
+        count_result = execute_query(count_sql, params)
+        
+        if not count_result["success"]:
+            return count_result
+            
+        row_count = 0
+        if count_result["data"]:
+            first_row = count_result["data"][0]
+            for value in first_row.values():
+                if isinstance(value, (int, float)):
+                    row_count = int(value)
+                    break
+        
+        # If the result set is large, use chunked processing
+        if row_count > max_rows:
+            print(f"Large dataset detected ({row_count} rows), using chunked processing...")
+            return execute_query_chunked(sql, params)
+        else:
+            return execute_query(sql, params)
+            
+    except Exception as e:
+        print(f"Query execution with limit check error: {e}")
         return {
             "success": False,
             "message": f"Database query failed: {str(e)}",

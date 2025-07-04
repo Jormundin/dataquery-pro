@@ -191,6 +191,13 @@ class QueryBuilder:
         sort_order = request_data.get('sort_order', 'ASC')
         limit = request_data.get('limit', 100)
         
+        # Apply safety limits for large datasets
+        if limit is None or limit <= 0:
+            limit = 100  # Default limit
+        elif limit > 100000:
+            print(f"Warning: Large limit requested ({limit}). Consider using chunked processing.")
+            # Don't automatically reduce the limit, but warn the user
+        
         # Validate table access
         if not self.validate_table_access(database_id, table_name):
             raise ValueError(f"Access denied to table: {table_name}")
@@ -204,11 +211,29 @@ class QueryBuilder:
         # Build complete query
         query = select_clause + table_clause + where_clause + order_clause
         
-        # Add limit using Oracle ROWNUM
+        # Add limit using Oracle ROWNUM - always add a limit to prevent runaway queries
         if limit and limit > 0:
             query = f"SELECT * FROM ({query}) WHERE ROWNUM <= {int(limit)}"
+        else:
+            # If no limit specified, add a reasonable default to prevent memory issues
+            query = f"SELECT * FROM ({query}) WHERE ROWNUM <= 10000"
         
         return query
+    
+    def build_query_with_memory_check(self, request_data: Dict[str, Any]) -> str:
+        """Build query with memory safety checks for large datasets"""
+        limit = request_data.get('limit', 100)
+        
+        # For queries without explicit limits or with very large limits, 
+        # we should warn about potential memory issues
+        if limit is None or limit > 50000:
+            print(f"Warning: Query may return large dataset. Consider using pagination or filters.")
+            if limit is None:
+                request_data['limit'] = 10000  # Set reasonable default
+            elif limit > 500000:
+                print(f"Warning: Very large limit ({limit}). This may cause memory issues.")
+        
+        return self.build_query(request_data)
     
     def build_count_query(self, request_data: Dict[str, Any]) -> str:
         """Build count query for pagination"""

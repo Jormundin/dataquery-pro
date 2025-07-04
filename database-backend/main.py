@@ -16,7 +16,7 @@ from dotenv import load_dotenv
 from models import *
 from database import (
     get_databases, get_tables, get_table_columns, 
-    test_connection, execute_query
+    test_connection, execute_query, execute_query_with_limit_check
 )
 from query_builder import QueryBuilder
 from auth import authenticate_user, create_access_token, get_current_user, ACCESS_TOKEN_EXPIRE_MINUTES
@@ -85,11 +85,11 @@ app_settings = {
         "database": os.getenv("ORACLE_SID", ""),
         "username": os.getenv("ORACLE_USER", ""),
         "ssl": False,
-        "connection_timeout": 30
+        "connection_timeout": 300  # Changed from 30 to 300 seconds (5 minutes)
     },
     "api": {
         "base_url": "http://172.28.80.18:1555",
-        "timeout": 30000,
+        "timeout": 300000,  # Changed from 30000 to 300000 milliseconds (5 minutes)
         "retries": 3,
         "api_key": ""
     },
@@ -233,12 +233,17 @@ async def execute_database_query(request: QueryRequest, current_user: dict = Dep
         request_data = request.dict()
         sql_query = query_builder.build_query(request_data)
         
-        # Execute query
-        result = execute_query(sql_query)
+        # Execute query with automatic chunking for large datasets
+        result = execute_query_with_limit_check(sql_query, max_rows=50000)
         
         execution_time = f"{(time.time() - start_time):.3f}s"
         
         if result["success"]:
+            # Add memory usage warning if dataset is large
+            row_count = result["row_count"]
+            if row_count > 100000:
+                result["message"] += f" - Warning: Large dataset ({row_count} rows). Consider adding filters to reduce data size."
+            
             # Add to query history with user info
             # Get next ID (max existing ID + 1)
             next_id = max([q.get("id", 0) for q in query_history], default=0) + 1
@@ -473,7 +478,8 @@ async def stratify_and_create_theories(data: Dict[str, Any], current_user: dict 
             raise HTTPException(status_code=500, detail=f"Ошибка построения SQL запроса: {str(e)}")
         
         try:
-            result = execute_query(sql_query)
+            # Use memory-efficient query execution for large datasets
+            result = execute_query_with_limit_check(sql_query, max_rows=100000)
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Ошибка выполнения запроса: {str(e)}")
         
@@ -482,6 +488,11 @@ async def stratify_and_create_theories(data: Dict[str, Any], current_user: dict 
         
         if not result["data"]:
             raise HTTPException(status_code=400, detail="Запрос не возвратил данных для стратификации")
+        
+        # Add memory usage warning
+        row_count = result["row_count"]
+        if row_count > 500000:
+            print(f"Warning: Large dataset for stratification ({row_count} rows). Memory-efficient processing will be used.")
         
         # Check if required dependencies are available
         try:
@@ -492,14 +503,18 @@ async def stratify_and_create_theories(data: Dict[str, Any], current_user: dict 
         except ImportError as e:
             raise HTTPException(status_code=500, detail=f"Отсутствует зависимость для стратификации: {str(e)}")
 
-        # Prepare data for stratification
+        # Prepare data for stratification with memory management options
         stratification_request = {
             "data": result["data"],
             "columns": result["columns"],
             "n_splits": stratification_config.get("numGroups", 2),
             "stratify_cols": stratification_config.get("stratifyColumns", []),
             "replace_nan": True,
-            "random_state": stratification_config.get("randomSeed", 42)
+            "random_state": stratification_config.get("randomSeed", 42),
+            # Memory management settings
+            "max_memory_rows": 500000,  # Process up to 500K rows in memory
+            "sample_size": min(100000, row_count),  # Use sampling for large datasets
+            "use_sampling": row_count > 500000  # Enable sampling for large datasets
         }
         
         # Check for case sensitivity issues and fix column names
@@ -537,7 +552,9 @@ async def stratify_and_create_theories(data: Dict[str, Any], current_user: dict 
         # Call local stratification function
         try:
             from stratification import stratify_data
+            print(f"Starting stratification for {row_count} rows...")
             stratification_result = stratify_data(stratification_request)
+            print(f"Stratification completed. Memory-efficient processing: {stratification_result.get('memory_info', {}).get('memory_efficient_processing', False)}")
         except ImportError as e:
             raise HTTPException(status_code=500, detail=f"Ошибка импорта модуля стратификации: {str(e)}")
         except Exception as e:

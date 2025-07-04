@@ -22,12 +22,12 @@ const Settings = () => {
     username: 'db_user',
     password: '',
     ssl: false,
-    connectionTimeout: 30
+    connectionTimeout: 300  // Changed from 30 to 300 seconds (5 minutes)
   });
 
   const [apiConfig, setApiConfig] = useState({
     baseUrl: 'http://localhost:8000',
-    timeout: 30000,
+    timeout: 300000,  // Changed from 30000 to 300000 milliseconds (5 minutes)
     retries: 3,
     apiKey: ''
   });
