@@ -332,7 +332,8 @@ async def execute_database_query(request: QueryRequest, current_user: dict = Dep
                 data=result["data"],
                 row_count=result["row_count"],
                 message=result["message"],
-                execution_time=execution_time
+                execution_time=execution_time,
+                temp_file_id=result.get("temp_file_id")
             )
         else:
             # Add failed query to history

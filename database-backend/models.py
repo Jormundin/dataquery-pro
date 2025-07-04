@@ -111,6 +111,7 @@ class QueryResultResponse(BaseModel):
     error: Optional[str] = None
     execution_time: Optional[str] = None
     memory_info: Optional[MemoryInfo] = None
+    temp_file_id: Optional[str] = None
 
 class QueryHistoryResponse(BaseModel):
     id: int
