@@ -932,20 +932,21 @@ def insert_control_group(theory_id, iin_values, date_start, date_end, additional
         VALUES (:1, :2, TO_DATE(:3, 'YYYY-MM-DD'), TO_DATE(:4, 'YYYY-MM-DD'), SYSDATE, :5, :6, :7, :8, :9)
         """
         
-        inserted_count = 0
+        # Use batch processing for better performance
+        batch_data = []
         for iin in iin_values:
-            try:
-                cursor.execute(insert_sql, (
-                    str(iin).strip(),
-                    theory_id,
-                    date_start,
-                    date_end,
-                    tab1, tab2, tab3, tab4, tab5
-                ))
-                inserted_count += 1
-            except Exception as e:
-                print(f"Error inserting control IIN {iin}: {e}")
-                continue
+            batch_data.append((
+                str(iin).strip(),
+                theory_id,
+                date_start,
+                date_end,
+                tab1, tab2, tab3, tab4, tab5
+            ))
+        
+        # Execute batch insert
+        print(f"Inserting {len(batch_data)} control users in batch...")
+        cursor.executemany(insert_sql, batch_data)
+        inserted_count = len(batch_data)
         
         connection.commit()
         cursor.close()
@@ -984,20 +985,21 @@ def insert_into_spss_theory_users(theory_id, iin_values, date_start, date_end, a
         VALUES (:1, :2, TO_DATE(:3, 'YYYY-MM-DD'), TO_DATE(:4, 'YYYY-MM-DD'), SYSDATE, :5, :6, :7, :8, :9)
         """
         
-        inserted_count = 0
+        # Use batch processing for better performance
+        batch_data = []
         for iin in iin_values:
-            try:
-                cursor.execute(insert_sql, (
-                    str(iin).strip(),
-                    theory_id,
-                    date_start,
-                    date_end,
-                    tab1, tab2, tab3, tab4, tab5
-                ))
-                inserted_count += 1
-            except Exception as e:
-                print(f"Error inserting target IIN {iin} into SPSS: {e}")
-                continue
+            batch_data.append((
+                str(iin).strip(),
+                theory_id,
+                date_start,
+                date_end,
+                tab1, tab2, tab3, tab4, tab5
+            ))
+        
+        # Execute batch insert
+        print(f"Inserting {len(batch_data)} target users into SPSS in batch...")
+        cursor.executemany(insert_sql, batch_data)
+        inserted_count = len(batch_data)
         
         connection.commit()
         cursor.close()
@@ -1045,20 +1047,21 @@ def insert_target_groups(theory_id, iin_values, date_start, date_end, additional
         VALUES (:1, :2, TO_DATE(:3, 'YYYY-MM-DD'), TO_DATE(:4, 'YYYY-MM-DD'), SYSDATE, :5, :6, :7, :8, :9)
         """
         
-        dssb_inserted_count = 0
+        # Use batch processing for better performance
+        batch_data = []
         for iin in iin_values:
-            try:
-                cursor.execute(insert_sql, (
-                    str(iin).strip(),
-                    theory_id,
-                    date_start,
-                    date_end,
-                    tab1, tab2, tab3, tab4, tab5
-                ))
-                dssb_inserted_count += 1
-            except Exception as e:
-                print(f"Error inserting target IIN {iin} into DSSB_APP: {e}")
-                continue
+            batch_data.append((
+                str(iin).strip(),
+                theory_id,
+                date_start,
+                date_end,
+                tab1, tab2, tab3, tab4, tab5
+            ))
+        
+        # Execute batch insert
+        print(f"Inserting {len(batch_data)} target users into DSSB_APP in batch...")
+        cursor.executemany(insert_sql, batch_data)
+        dssb_inserted_count = len(batch_data)
         
         connection.commit()
         cursor.close()
