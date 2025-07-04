@@ -230,16 +230,33 @@ active_connections = {}
 
 @app.websocket("/ws/progress/{client_id}")
 async def websocket_progress(websocket: WebSocket, client_id: str):
-    await websocket.accept()
-    active_connections[client_id] = websocket
+    print(f"WebSocket connection attempt for client: {client_id}")
     try:
+        await websocket.accept()
+        active_connections[client_id] = websocket
+        print(f"✅ WebSocket connected for client: {client_id}")
+        
+        # Send initial connection confirmation
+        await websocket.send_json({
+            "type": "connection_confirmed",
+            "client_id": client_id,
+            "message": "WebSocket connection established"
+        })
+        
+        # Keep connection alive
         while True:
-            # Keep connection alive
-            await asyncio.sleep(1)
+            await asyncio.sleep(5)  # Ping every 5 seconds
+            await websocket.send_json({
+                "type": "ping",
+                "timestamp": time.time()
+            })
+            
     except WebSocketDisconnect:
-        del active_connections[client_id]
+        print(f"WebSocket disconnected for client: {client_id}")
+        if client_id in active_connections:
+            del active_connections[client_id]
     except Exception as e:
-        print(f"WebSocket error: {e}")
+        print(f"WebSocket error for client {client_id}: {e}")
         if client_id in active_connections:
             del active_connections[client_id]
 
@@ -455,31 +472,78 @@ async def detect_iins_in_results(data: Dict[str, Any], current_user: dict = Depe
     """Обнаружить IIN колонки в результатах запроса"""
     try:
         from database import detect_iin_columns, extract_iin_values
-        
-        # Handle different possible data structures from frontend
-        results_data = data.get("results", {})
+        import json
+        import tempfile
+        import os
         
         # Debug logging to help identify issues
         print(f"DEBUG: Received data keys: {list(data.keys())}")
-        print(f"DEBUG: Results data type: {type(results_data)}")
-        if isinstance(results_data, dict):
-            print(f"DEBUG: Results data keys: {list(results_data.keys())}")
         
-        # If results is the direct query response structure, extract the data array
-        if isinstance(results_data, dict) and "data" in results_data:
-            query_results = results_data.get("data", [])
-            print(f"DEBUG: Using results.data, found {len(query_results)} rows")
-        # If results is already the data array
-        elif isinstance(results_data, list):
-            query_results = results_data
-            print(f"DEBUG: Using results as data array, found {len(query_results)} rows")
-        # If results is directly passed in the top level
-        elif "data" in data:
-            query_results = data.get("data", [])
-            print(f"DEBUG: Using data.data, found {len(query_results)} rows")
+        # Check if we have temp file data (for large datasets)
+        if "temp_file_id" in data:
+            temp_file_id = data["temp_file_id"]
+            total_rows = data.get("total_rows", 0)
+            columns = data.get("columns", [])
+            
+            print(f"DEBUG: Using temp file for IIN detection: {temp_file_id}")
+            print(f"DEBUG: Total rows in temp file: {total_rows:,}")
+            
+            # Read sample data from temp file to detect IIN column
+            temp_file_path = os.path.join(tempfile.gettempdir(), f"query_result_{temp_file_id}.jsonl")
+            
+            if not os.path.exists(temp_file_path):
+                print(f"DEBUG: Temp file not found: {temp_file_path}")
+                return {
+                    "has_iin_column": False,
+                    "iin_column": None,
+                    "iin_values": [],
+                    "user_count": 0,
+                    "error": "Temporary file not found"
+                }
+            
+            # Read first 1000 rows to detect IIN column structure
+            sample_data = []
+            with open(temp_file_path, 'r', encoding='utf-8') as f:
+                for i, line in enumerate(f):
+                    if i >= 1000:  # Sample first 1000 rows
+                        break
+                    try:
+                        row_data = json.loads(line.strip())
+                        sample_data.append(row_data)
+                    except json.JSONDecodeError:
+                        continue
+            
+            query_results = sample_data
+            print(f"DEBUG: Loaded {len(sample_data)} sample rows from temp file for IIN detection")
+            
         else:
-            query_results = []
-            print("DEBUG: No valid data structure found, using empty array")
+            # Handle regular data structures from frontend (small datasets)
+            results_data = data.get("results", {})
+            total_rows = None
+            
+            print(f"DEBUG: Results data type: {type(results_data)}")
+            if isinstance(results_data, dict):
+                print(f"DEBUG: Results data keys: {list(results_data.keys())}")
+            
+            # If results is the direct query response structure, extract the data array
+            if isinstance(results_data, dict) and "data" in results_data:
+                query_results = results_data.get("data", [])
+                total_rows = results_data.get("row_count", len(query_results))
+                print(f"DEBUG: Using results.data, found {len(query_results)} rows")
+            # If results is already the data array
+            elif isinstance(results_data, list):
+                query_results = results_data
+                total_rows = len(query_results)
+                print(f"DEBUG: Using results as data array, found {len(query_results)} rows")
+            # If results is directly passed in the top level
+            elif "data" in data:
+                query_results = data.get("data", [])
+                total_rows = len(query_results)
+                print(f"DEBUG: Using data.data, found {len(query_results)} rows")
+            else:
+                query_results = []
+                total_rows = 0
+                print("DEBUG: No valid data structure found, using empty array")
         
         if not query_results or len(query_results) == 0:
             print("DEBUG: No query results to analyze")
@@ -500,12 +564,17 @@ async def detect_iins_in_results(data: Dict[str, Any], current_user: dict = Depe
         
         if iin_column:
             iin_values = extract_iin_values(query_results, iin_column)
-            print(f"DEBUG: Extracted {len(iin_values)} unique IIN values")
+            print(f"DEBUG: Extracted {len(iin_values)} unique IIN values from sample")
+            
+            # For temp file data, use total_rows from the request instead of sample count
+            user_count = total_rows if "temp_file_id" in data else len(iin_values)
+            print(f"DEBUG: Reporting user count: {user_count:,}")
+            
             return {
                 "has_iin_column": True,
                 "iin_column": iin_column,
-                "iin_values": iin_values,
-                "user_count": len(iin_values)
+                "iin_values": iin_values,  # Sample IIN values for verification
+                "user_count": user_count  # Use total count for temp files
             }
         else:
             print("DEBUG: No IIN column detected")

@@ -12,6 +12,7 @@ import {
   Target
 } from 'lucide-react';
 import { databaseAPI, queryBuilder } from '../services/api';
+import '../components/ProgressBar.css';
 
 const QueryBuilder = () => {
   const [selectedDatabase, setSelectedDatabase] = useState('');
@@ -34,6 +35,7 @@ const QueryBuilder = () => {
   // Progress tracking state
   const [queryProgress, setQueryProgress] = useState(null);
   const [wsClient, setWsClient] = useState(null);
+  const [wsStatus, setWsStatus] = useState('disconnected'); // disconnected, connecting, connected
   const [clientId] = useState(() => Math.random().toString(36).substr(2, 9));
 
   // Pagination state for query results
@@ -76,27 +78,40 @@ const QueryBuilder = () => {
     const fullWsUrl = `${wsUrl}/ws/progress/${clientId}`;
     console.log('Attempting WebSocket connection to:', fullWsUrl);
     
+    setWsStatus('connecting');
     const ws = new WebSocket(fullWsUrl);
     
     ws.onopen = () => {
       console.log('✅ WebSocket connected for progress tracking');
       setWsClient(ws);
+      setWsStatus('connected');
     };
     
     ws.onmessage = (event) => {
-      const progress = JSON.parse(event.data);
-      console.log('Progress update received:', progress);
-      setQueryProgress(progress);
+      const message = JSON.parse(event.data);
+      console.log('WebSocket message received:', message);
+      
+      if (message.type === 'connection_confirmed') {
+        console.log('✅ WebSocket connection confirmed');
+      } else if (message.type === 'ping') {
+        // Ignore ping messages
+      } else {
+        // Progress update
+        console.log('Progress update received:', message);
+        setQueryProgress(message);
+      }
     };
     
     ws.onerror = (error) => {
       console.error('❌ WebSocket error:', error);
       console.error('WebSocket URL was:', fullWsUrl);
+      setWsStatus('disconnected');
     };
     
     ws.onclose = (event) => {
       console.log('WebSocket disconnected. Code:', event.code, 'Reason:', event.reason);
       setWsClient(null);
+      setWsStatus('disconnected');
     };
     
     return () => {
@@ -232,6 +247,23 @@ const QueryBuilder = () => {
     setQueryProgress(null); // Reset progress
     
     console.log('Starting query execution with client_id:', clientId);
+    
+    // If WebSocket is not connected, simulate progress
+    let progressSimulation = null;
+    if (wsStatus !== 'connected' && limit > 100000) {
+      console.log('WebSocket not connected, simulating progress...');
+      let simulatedProgress = 0;
+      progressSimulation = setInterval(() => {
+        simulatedProgress += Math.random() * 10 + 5; // 5-15% increments
+        if (simulatedProgress < 90) {
+          setQueryProgress({
+            percent: simulatedProgress,
+            message: `Обрабатывается запрос... (имитация прогресса)`,
+            rows_processed: Math.floor((simulatedProgress / 100) * limit)
+          });
+        }
+      }, 1000);
+    }
     
     try {
       const queryData = {
@@ -389,12 +421,27 @@ const QueryBuilder = () => {
   // Theory creation functions
   const checkForIINColumns = async (results) => {
     try {
-      const response = await databaseAPI.detectIINs({ results });
+      // Use temp file info if available for large datasets
+      let detectData;
+      if (results.temp_file_id) {
+        console.log('Using temp file for IIN detection:', results.temp_file_id);
+        detectData = {
+          temp_file_id: results.temp_file_id,
+          columns: results.columns,
+          total_rows: results.row_count
+        };
+      } else {
+        console.log('Using direct results for IIN detection (small dataset)');
+        detectData = { results };
+      }
+      
+      const response = await databaseAPI.detectIINs(detectData);
       setIinInfo(response.data);
       
       if (response.data.has_iin_column) {
         // Show success message that theory creation is available
-        console.log(`Обнаружена IIN колонка: ${response.data.iin_column} (${response.data.user_count} пользователей)`);
+        const userCount = results.temp_file_id ? results.row_count : response.data.user_count;
+        console.log(`Обнаружена IIN колонка: ${response.data.iin_column} (${userCount} пользователей)`);
       }
     } catch (err) {
       console.error('Error detecting IIN columns:', err);
@@ -1018,27 +1065,12 @@ const QueryBuilder = () => {
           
           {/* Progress Bar */}
           {queryProgress && (
-            <div style={{ 
-              width: '100%', 
-              backgroundColor: '#e5e7eb', 
-              borderRadius: '0.375rem', 
-              overflow: 'hidden',
-              marginTop: '1rem'
-            }}>
+            <div className="progress-bar-container">
               <div 
-                style={{
-                  height: '0.5rem',
-                  backgroundColor: '#3b82f6',
-                  width: `${queryProgress.percent || 0}%`,
-                  transition: 'width 0.3s ease'
-                }}
+                className="progress-bar-fill"
+                style={{ width: `${queryProgress.percent || 0}%` }}
               />
-              <div style={{ 
-                fontSize: '0.75rem', 
-                color: '#374151', 
-                padding: '0.25rem 0.5rem',
-                textAlign: 'center'
-              }}>
+              <div className="progress-bar-text">
                 {queryProgress.message} ({Math.round(queryProgress.percent || 0)}%)
               </div>
             </div>
@@ -1046,16 +1078,15 @@ const QueryBuilder = () => {
           
           {/* Debug info */}
           {isLoading && (
-            <div style={{ 
-              marginTop: '1rem',
-              padding: '0.5rem',
-              backgroundColor: '#f3f4f6',
-              borderRadius: '0.375rem',
-              fontSize: '0.75rem',
-              color: '#6b7280'
-            }}>
-              🔄 Загружается... {queryProgress ? `(${Math.round(queryProgress.percent || 0)}%)` : '(подключение...)'}<br/>
-              WebSocket: {wsClient ? '✅ Подключен' : '❌ Не подключен'} | Client ID: {clientId}
+            <div className="progress-debug-info">
+              🔄 Загружается... {queryProgress ? `(${Math.round(queryProgress.percent || 0)}%)` : '(инициализация...)'}<br/>
+              <span className={`websocket-status ${wsStatus}`}>
+                WebSocket: {
+                  wsStatus === 'connected' ? '✅ Подключен' : 
+                  wsStatus === 'connecting' ? '🔄 Подключение...' : 
+                  '❌ Не подключен'
+                }
+              </span> | Client ID: {clientId}
             </div>
           )}
           
