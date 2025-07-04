@@ -431,7 +431,7 @@ def execute_query_chunked_with_limit(sql: str, params: Dict = None, total_rows: 
         
         print(f"Chunked processing with limit completed: {rows_processed:,} total rows, {len(display_data)} returned to frontend")
         
-        return {
+        result = {
             "success": True,
             "columns": columns,
             "data": display_data,  # Only first 100 rows
@@ -441,6 +441,13 @@ def execute_query_chunked_with_limit(sql: str, params: Dict = None, total_rows: 
             "temp_file_path": temp_file_path,
             "message": message
         }
+        
+        print(f"🔄 RETURNING from execute_query_chunked_with_limit:")
+        print(f"   - temp_file_id: {temp_file_id}")
+        print(f"   - row_count: {rows_processed:,}")
+        print(f"   - rows_returned: {len(display_data)}")
+        
+        return result
         
     except Exception as e:
         # Clean up temp file on error
@@ -590,9 +597,11 @@ def execute_query_with_limit_check(sql: str, params: Dict = None, max_rows: int 
                 print(f"Query has ROWNUM limit: {limit_value:,}")
                 if limit_value > max_rows:
                     print(f"ROWNUM limit ({limit_value:,}) exceeds threshold ({max_rows:,}), using chunked processing anyway")
+                    print(f"🔄 CALLING: execute_query_chunked_with_limit for large ROWNUM query")
                     return execute_query_chunked_with_limit(sql, params, limit_value, progress_callback=progress_callback)
                 else:
                     print("Query already has reasonable limit, executing directly")
+                    print(f"⚡ CALLING: execute_query (direct) for small ROWNUM query")
                     return execute_query(sql, params)
             else:
                 print("Query already has limit, executing directly")
