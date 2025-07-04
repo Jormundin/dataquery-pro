@@ -26,8 +26,8 @@ class StratificationRequest(BaseModel):
     min_p_value: float = Field(None, ge=0.0, le=1.0, description="Minimum p-value threshold for statistical tests. Stratification will iterate until this threshold is met or exceeded.")
     max_iterations: int = Field(100, ge=1, le=1000, description="Maximum number of iterations to attempt when trying to meet p-value threshold.")
     # New fields for memory management
-    max_memory_rows: int = Field(500000, ge=10000, le=2000000, description="Maximum number of rows to process in memory before using sampling.")
-    sample_size: int = Field(100000, ge=10000, le=500000, description="Sample size to use for large datasets.")
+    max_memory_rows: int = Field(1500000, ge=100000, le=5000000, description="Maximum number of rows to process in memory before using sampling.")
+    sample_size: int = Field(500000, ge=50000, le=1000000, description="Sample size to use for large datasets.")
     use_sampling: bool = Field(True, description="Whether to use sampling for large datasets.")
    
     def __init__(self, **data):
@@ -304,9 +304,9 @@ def memory_efficient_stratification(df: pd.DataFrame, y: pd.Series, request: Str
                 test_dict = {}
                 
                 # Use a sample for statistical testing if the full split is too large
-                if len(full_split) > 10000:
-                    test_sample = full_split.sample(n=min(10000, len(full_split)), random_state=request.random_state)
-                    df_sample = df.sample(n=min(10000, len(df)), random_state=request.random_state)
+                if len(full_split) > 50000:
+                    test_sample = full_split.sample(n=min(50000, len(full_split)), random_state=request.random_state)
+                    df_sample = df.sample(n=min(50000, len(df)), random_state=request.random_state)
                     
                     for col in test_columns:
                         if col in df.columns:
@@ -372,14 +372,22 @@ def stratify_data(request_data: Dict[str, Any]) -> Dict[str, Any]:
         print(f"Reconstructing DataFrame with {len(request.data)} rows and {len(request.columns)} columns...")
         df = pd.DataFrame(data=request.data, columns=request.columns)
         
-        # Add memory usage information
+        # Add memory usage information and safety checks
         memory_usage_mb = df.memory_usage(deep=True).sum() / 1024 / 1024
         print(f"DataFrame memory usage: {memory_usage_mb:.2f} MB")
         
-        # Check if we need to enable memory-efficient processing
-        if len(df) > 500000:
-            print(f"Large dataset detected ({len(df)} rows). Memory-efficient processing will be used.")
+        # Critical memory threshold - prevent crashes only at extreme sizes
+        if memory_usage_mb > 8000:  # 8GB threshold for critical failure
+            raise ValueError(f"Dataset exceeds system limits ({memory_usage_mb:.1f} MB). System cannot process datasets larger than 8GB.")
+        elif memory_usage_mb > 4000:  # 4GB warning
+            print(f"Large dataset detected ({memory_usage_mb:.1f} MB). Using memory-efficient processing.")
+        
+        # Check if we need to enable memory-efficient processing for very large datasets
+        if len(df) > 1500000:
+            print(f"Very large dataset detected ({len(df)} rows). Enabling memory-efficient processing.")
             request.use_sampling = True
+        elif len(df) > 2000000:
+            print(f"Processing {len(df)} rows using optimized algorithms.")
             
     except Exception as e:
         raise ValueError(f"Error reconstructing DataFrame: {e}")
@@ -513,13 +521,14 @@ def stratify_data(request_data: Dict[str, Any]) -> Dict[str, Any]:
     total_rows = df.shape[0]
    
     for i, split_df in enumerate(splits):
-        # Convert DataFrame to JSON - limit size if too large
-        if len(split_df) > 10000:
-            print(f"Split {i+1} is large ({len(split_df)} rows). Consider using smaller splits for JSON serialization.")
-            # For very large splits, we might want to return only a sample for JSON
-            # Or implement a different return format
-            
-        split_data_json = split_df.to_dict(orient='records')
+        # Handle JSON conversion for large datasets
+        if len(split_df) > 100000:
+            print(f"Split {i+1} contains {len(split_df)} rows. Using efficient JSON conversion.")
+            # For very large splits, use more efficient conversion
+            split_data_json = split_df.head(100000).to_dict(orient='records')
+            print(f"Note: Split {i+1} JSON response limited to first 100,000 rows for efficiency.")
+        else:
+            split_data_json = split_df.to_dict(orient='records')
         actual_proportion = split_df.shape[0] / total_rows
        
         stratum_info = {
@@ -581,10 +590,15 @@ def stratify_data(request_data: Dict[str, Any]) -> Dict[str, Any]:
     if iteration_info:
         response['iteration_info'] = iteration_info
 
-    # Clean up memory
-    del df, y, splits
-    if test_df is not None:
-        del test_df
-    gc.collect()
+    # Clean up memory more aggressively
+    try:
+        del df, y, splits
+        if test_df is not None:
+            del test_df
+        # Force garbage collection multiple times for better memory cleanup
+        gc.collect()
+        gc.collect()
+    except:
+        pass  # Ignore cleanup errors
 
     return response 

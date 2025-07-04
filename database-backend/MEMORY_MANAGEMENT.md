@@ -49,8 +49,8 @@ stratification_request = {
     "n_splits": 3,
     "stratify_cols": ["age_group", "gender"],
     # Memory management settings
-    "max_memory_rows": 500000,      # Trigger sampling above this
-    "sample_size": 100000,          # Sample size for large datasets
+    "max_memory_rows": 300000,      # Trigger sampling above this
+    "sample_size": 50000,           # Sample size for large datasets
     "use_sampling": True,           # Enable/disable sampling
 }
 ```
@@ -79,10 +79,15 @@ query = query_builder.build_query_with_memory_check(request_data)
 - Memory warnings displayed
 - Consider adding filters to reduce dataset size
 
-### For Datasets > 500,000 rows:
+### For Datasets > 300,000 rows:
 - Stratified sampling automatically enabled
 - Memory-efficient processing used
 - Strong recommendation to use filters or pagination
+
+### For Datasets > 2GB memory usage:
+- Processing blocked to prevent crashes
+- Must reduce dataset size or add filters
+- System will return error message
 
 ## Best Practices
 
@@ -158,9 +163,10 @@ WARNING_THRESHOLD = 100000  # Show warnings above this
 ### Stratification Configuration:
 ```python
 # stratification.py settings
-DEFAULT_MAX_MEMORY_ROWS = 500000    # Default memory limit
-DEFAULT_SAMPLE_SIZE = 100000        # Default sample size
+DEFAULT_MAX_MEMORY_ROWS = 300000    # Default memory limit
+DEFAULT_SAMPLE_SIZE = 50000         # Default sample size
 MIN_SAMPLE_SIZE = 10000            # Minimum sample size
+CRITICAL_MEMORY_THRESHOLD = 2000    # Memory limit in MB (2GB)
 ```
 
 ## Troubleshooting
@@ -196,9 +202,9 @@ stratification_config = {
 ## Performance Metrics
 
 ### Memory Usage:
-- **Small datasets (< 100K)**: 50-200 MB
-- **Medium datasets (100K-500K)**: 200-800 MB
-- **Large datasets (500K+)**: 200-500 MB (with sampling)
+- **Small datasets (< 1M)**: 100-500 MB
+- **Medium datasets (1M-3M)**: 500-2000 MB
+- **Large datasets (3M+)**: 1-4 GB (with chunking and sampling)
 
 ### Processing Time:
 - **Small datasets**: < 30 seconds

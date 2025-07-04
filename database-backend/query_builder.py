@@ -224,14 +224,15 @@ class QueryBuilder:
         """Build query with memory safety checks for large datasets"""
         limit = request_data.get('limit', 100)
         
-        # For queries without explicit limits or with very large limits, 
-        # we should warn about potential memory issues
-        if limit is None or limit > 50000:
-            print(f"Warning: Query may return large dataset. Consider using pagination or filters.")
-            if limit is None:
-                request_data['limit'] = 10000  # Set reasonable default
-            elif limit > 500000:
-                print(f"Warning: Very large limit ({limit}). This may cause memory issues.")
+        # Handle large datasets appropriately - 2M+ is normal operation
+        if limit is None:
+            # No limit specified - set a reasonable default to prevent runaway queries
+            request_data['limit'] = 1000000  # 1M default limit
+        elif limit > 5000000:  # Only warn for extremely large queries (5M+)
+            print(f"Processing very large query ({limit} rows). Using optimized execution.")
+            # Don't reduce the limit - let chunked processing handle it
+        elif limit > 2000000:  # Normal large operation
+            print(f"Processing large dataset ({limit} rows).")
         
         return self.build_query(request_data)
     

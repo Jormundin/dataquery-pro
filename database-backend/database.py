@@ -309,9 +309,11 @@ def execute_query(sql: str, params: Dict = None) -> Dict:
         # Fetch results
         rows = cursor.fetchall()
         
-        # Add memory warning for large datasets
-        if len(rows) > 100000:
-            print(f"Warning: Large dataset loaded ({len(rows)} rows). Consider using chunked processing for datasets over 100,000 rows.")
+        # Monitor memory usage for very large datasets
+        if len(rows) > 3000000:
+            print(f"Processing very large dataset ({len(rows)} rows) - this may take some time.")
+        elif len(rows) > 1000000:
+            print(f"Processing large dataset ({len(rows)} rows).")
         
         # Convert to list of dictionaries
         data = []
@@ -345,7 +347,7 @@ def execute_query(sql: str, params: Dict = None) -> Dict:
             "error": str(e)
         }
 
-def execute_query_chunked(sql: str, params: Dict = None, chunk_size: int = 5000) -> Dict:
+def execute_query_chunked(sql: str, params: Dict = None, chunk_size: int = 50000) -> Dict:
     """Execute SQL query with chunked processing for large datasets"""
     try:
         conn = get_connection_DSSB_APP()
@@ -383,9 +385,9 @@ def execute_query_chunked(sql: str, params: Dict = None, chunk_size: int = 5000)
             
             total_rows += len(chunk)
             
-            # Optional: Add memory warning for very large datasets
-            if total_rows > 100000 and total_rows % 50000 == 0:
-                print(f"Warning: Loading large dataset, {total_rows} rows processed so far...")
+            # Progress indicator for very large datasets
+            if total_rows > 2000000 and total_rows % 500000 == 0:
+                print(f"Progress: {total_rows} rows processed so far...")
         
         cursor.close()
         conn.close()
@@ -406,7 +408,7 @@ def execute_query_chunked(sql: str, params: Dict = None, chunk_size: int = 5000)
             "error": str(e)
         }
 
-def execute_query_with_limit_check(sql: str, params: Dict = None, max_rows: int = 50000) -> Dict:
+def execute_query_with_limit_check(sql: str, params: Dict = None, max_rows: int = 1000000) -> Dict:
     """Execute query with automatic limit checking and chunked processing for large datasets"""
     try:
         # First, check if this is a count query
@@ -432,9 +434,9 @@ def execute_query_with_limit_check(sql: str, params: Dict = None, max_rows: int 
                     row_count = int(value)
                     break
         
-        # If the result set is large, use chunked processing
+        # Use chunked processing for very large datasets to prevent memory issues
         if row_count > max_rows:
-            print(f"Large dataset detected ({row_count} rows), using chunked processing...")
+            print(f"Very large dataset detected ({row_count} rows), using chunked processing for memory efficiency.")
             return execute_query_chunked(sql, params)
         else:
             return execute_query(sql, params)
@@ -446,6 +448,11 @@ def execute_query_with_limit_check(sql: str, params: Dict = None, max_rows: int 
             "message": f"Database query failed: {str(e)}",
             "error": str(e)
         }
+
+def execute_query_safe(sql: str, params: Dict = None) -> Dict:
+    """Execute query with automatic memory safety checks - optimized for large datasets"""
+    # Use higher threshold for limit checking to accommodate normal 2M+ operations
+    return execute_query_with_limit_check(sql, params, max_rows=1000000)
 
 # Theory Management Functions
 def get_next_sc_campaign_id():

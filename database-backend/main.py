@@ -16,7 +16,7 @@ from dotenv import load_dotenv
 from models import *
 from database import (
     get_databases, get_tables, get_table_columns, 
-    test_connection, execute_query, execute_query_with_limit_check
+    test_connection, execute_query, execute_query_with_limit_check, execute_query_safe
 )
 from query_builder import QueryBuilder
 from auth import authenticate_user, create_access_token, get_current_user, ACCESS_TOKEN_EXPIRE_MINUTES
@@ -229,20 +229,22 @@ async def execute_database_query(request: QueryRequest, current_user: dict = Dep
     try:
         start_time = time.time()
         
-        # Build safe SQL query
+        # Build safe SQL query with memory checks
         request_data = request.dict()
-        sql_query = query_builder.build_query(request_data)
+        sql_query = query_builder.build_query_with_memory_check(request_data)
         
         # Execute query with automatic chunking for large datasets
-        result = execute_query_with_limit_check(sql_query, max_rows=50000)
+        result = execute_query_safe(sql_query)
         
         execution_time = f"{(time.time() - start_time):.3f}s"
         
         if result["success"]:
-            # Add memory usage warning if dataset is large
+            # Add information for very large datasets
             row_count = result["row_count"]
-            if row_count > 100000:
-                result["message"] += f" - Warning: Large dataset ({row_count} rows). Consider adding filters to reduce data size."
+            if row_count > 3000000:
+                result["message"] += f" - Large dataset processed ({row_count} rows)."
+            elif row_count > 1000000:
+                result["message"] += f" - Dataset contains {row_count} rows."
             
             # Add to query history with user info
             # Get next ID (max existing ID + 1)
