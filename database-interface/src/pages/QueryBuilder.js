@@ -293,6 +293,10 @@ const QueryBuilder = () => {
         setQueryResults(queryResultsData);
 
         // Check for IIN columns after successful query - use processed data with tempFileId
+        console.log('🔍 Response data keys:', Object.keys(response.data));
+        console.log('🔍 temp_file_id in response:', response.data.temp_file_id);
+        console.log('🔍 row_count in response:', response.data.row_count);
+        
         await checkForIINColumns({
           ...response.data,
           temp_file_id: response.data.temp_file_id
