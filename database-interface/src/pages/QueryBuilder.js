@@ -280,7 +280,7 @@ const QueryBuilder = () => {
       const response = await databaseAPI.executeQuery(queryData);
       
       if (response.data.success) {
-        setQueryResults({
+        const queryResultsData = {
           columns: response.data.columns || [],
           data: response.data.data || [],
           totalRows: response.data.row_count || 0,
@@ -288,10 +288,15 @@ const QueryBuilder = () => {
           executionTime: response.data.execution_time || 'неизвестно',
           tempFileId: response.data.temp_file_id || null,
           message: response.data.message || ''
-        });
+        };
+        
+        setQueryResults(queryResultsData);
 
-        // Check for IIN columns after successful query
-        await checkForIINColumns(response.data);
+        // Check for IIN columns after successful query - use processed data with tempFileId
+        await checkForIINColumns({
+          ...response.data,
+          temp_file_id: response.data.temp_file_id
+        });
       } else {
         setError(response.data.message || 'Ошибка выполнения запроса');
       }
@@ -421,17 +426,28 @@ const QueryBuilder = () => {
   // Theory creation functions
   const checkForIINColumns = async (results) => {
     try {
+      // Debug: Log what we received
+      console.log('🔍 checkForIINColumns called with:', {
+        hasData: !!results.data,
+        hasTempFileId: !!results.temp_file_id,
+        rowCount: results.row_count,
+        tempFileId: results.temp_file_id,
+        dataLength: results.data ? results.data.length : 'no data'
+      });
+      
       // Use temp file info if available for large datasets
       let detectData;
       if (results.temp_file_id) {
-        console.log('Using temp file for IIN detection:', results.temp_file_id);
+        console.log('✅ Using temp file for IIN detection:', results.temp_file_id);
+        console.log('📊 Total rows in temp file:', results.row_count);
         detectData = {
           temp_file_id: results.temp_file_id,
           columns: results.columns,
           total_rows: results.row_count
         };
       } else {
-        console.log('Using direct results for IIN detection (small dataset)');
+        console.log('⚠️ No temp file ID found, using direct results for IIN detection (small dataset)');
+        console.log('📊 Direct results length:', results.data ? results.data.length : 'no data');
         detectData = { results };
       }
       
