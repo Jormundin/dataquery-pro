@@ -345,6 +345,120 @@ def execute_query(sql: str, params: Dict = None) -> Dict:
             "error": str(e)
         }
 
+def execute_query_chunked_with_limit(sql: str, params: Dict = None, total_rows: int = 0, progress_callback=None) -> Dict:
+    """Execute SQL query that already has ROWNUM limit, but only return first 100 rows to frontend"""
+    import tempfile
+    import json
+    import os
+    import uuid
+    
+    print(f"Processing query with existing limit. Total rows: {total_rows:,}, returning only 100 to frontend")
+    temp_file_path = None
+    
+    try:
+        conn = get_connection_DSSB_APP()
+        cursor = conn.cursor()
+        
+        # Set array size for better performance
+        cursor.arraysize = 10000
+        
+        # Execute the original query (which already has ROWNUM limit)
+        if params:
+            cursor.execute(sql, params)
+        else:
+            cursor.execute(sql)
+        
+        # Get column names
+        columns = [desc[0].lower() for desc in cursor.description] if cursor.description else []
+        
+        # Create temporary file for full dataset
+        temp_file_id = str(uuid.uuid4())
+        temp_file_path = os.path.join(tempfile.gettempdir(), f"query_result_{temp_file_id}.jsonl")
+        
+        # Only first 100 rows for frontend display
+        display_data = []
+        rows_processed = 0
+        chunk_size = 50000
+        
+        with open(temp_file_path, 'w', encoding='utf-8') as temp_file:
+            while True:
+                chunk = cursor.fetchmany(chunk_size)
+                if not chunk:
+                    break
+                
+                # Process chunk
+                for row in chunk:
+                    row_dict = {}
+                    for i, value in enumerate(row):
+                        # Handle different Oracle data types
+                        if isinstance(value, cx_Oracle.LOB):
+                            value = value.read() if value else None
+                        elif hasattr(value, 'isoformat'):  # Date/DateTime
+                            value = value.isoformat()
+                        row_dict[columns[i]] = value
+                    
+                    # Save to temp file
+                    temp_file.write(json.dumps(row_dict, ensure_ascii=False) + '\n')
+                    
+                    # Keep only first 100 rows for display
+                    if rows_processed < 100:
+                        display_data.append(row_dict)
+                    
+                    rows_processed += 1
+                
+                # Send progress update
+                if progress_callback and rows_processed > 0:
+                    progress_percent = min(100, (rows_processed / total_rows) * 100)
+                    try:
+                        progress_callback({
+                            "rows_processed": rows_processed,
+                            "percent": progress_percent,
+                            "message": f"Обработано {rows_processed:,} записей..."
+                        })
+                    except Exception as e:
+                        print(f"Progress callback error: {e}")
+                
+                # Progress log
+                if rows_processed % 500000 == 0:
+                    print(f"Progress: {rows_processed:,} rows processed so far...")
+        
+        cursor.close()
+        conn.close()
+        
+        message = f"Запрос выполнен успешно. Всего записей: {rows_processed:,}"
+        if rows_processed > 100:
+            message += f". Показаны первые 100 записей. Полный набор данных сохранен во временном файле для обработки."
+        
+        print(f"Chunked processing with limit completed: {rows_processed:,} total rows, {len(display_data)} returned to frontend")
+        
+        return {
+            "success": True,
+            "columns": columns,
+            "data": display_data,  # Only first 100 rows
+            "row_count": rows_processed,
+            "rows_returned": len(display_data),
+            "temp_file_id": temp_file_id,
+            "temp_file_path": temp_file_path,
+            "message": message
+        }
+        
+    except Exception as e:
+        # Clean up temp file on error
+        if temp_file_path and os.path.exists(temp_file_path):
+            try:
+                os.remove(temp_file_path)
+            except:
+                pass
+                
+        print(f"Chunked query with limit execution error: {e}")
+        import traceback
+        traceback.print_exc()
+        return {
+            "success": False,
+            "message": f"Ошибка выполнения запроса для большого набора данных: {str(e)}",
+            "error": str(e)
+        }
+
 def execute_query_chunked(sql: str, params: Dict = None, chunk_size: int = 50000, progress_callback=None) -> Dict:
     """Execute SQL query with chunked processing and temporary file storage for large datasets"""
     import tempfile
@@ -466,10 +580,23 @@ def execute_query_with_limit_check(sql: str, params: Dict = None, max_rows: int 
             print("Count query detected, executing directly")
             return execute_query(sql, params)
             
-        # Check if query already has a limit
+        # Check if query already has a limit, but still use chunking for very large requests
         if "ROWNUM" in sql.upper() or "FETCH FIRST" in sql.upper():
-            print("Query already has limit, executing directly")
-            return execute_query(sql, params)
+            # Extract the limit from ROWNUM query to check if it's too large
+            import re
+            rownum_match = re.search(r'ROWNUM\s*<=\s*(\d+)', sql.upper())
+            if rownum_match:
+                limit_value = int(rownum_match.group(1))
+                print(f"Query has ROWNUM limit: {limit_value:,}")
+                if limit_value > max_rows:
+                    print(f"ROWNUM limit ({limit_value:,}) exceeds threshold ({max_rows:,}), using chunked processing anyway")
+                    return execute_query_chunked_with_limit(sql, params, limit_value, progress_callback=progress_callback)
+                else:
+                    print("Query already has reasonable limit, executing directly")
+                    return execute_query(sql, params)
+            else:
+                print("Query already has limit, executing directly")
+                return execute_query(sql, params)
             
         # For potentially large queries, first get a count
         count_sql = f"SELECT COUNT(*) FROM ({sql})"
