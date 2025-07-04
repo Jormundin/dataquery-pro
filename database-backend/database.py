@@ -10,23 +10,21 @@ load_dotenv()
 # Hardcoded list of tables that frontend has access to
 ALLOWED_TABLES = {
     'DSSB_APP': {
-        'DSSB_DM.RB_CLIENTS': {
+        'dssb_app.sc_clients_global_target': {
             'description': 'Информация о клиентах',
             'columns': [
-                {'name': 'SNAPSHOT_DATE', 'type': 'DATE', 'description': 'DATE'},
-                {'name': 'OCRM_DWH_ID', 'type': 'NUMBER', 'description': 'ID'},
-                {'name': 'GM_SYSTEM_CODE', 'type': 'VARCHAR2', 'description': 'ID'},
-                {'name': 'IIN_BIN', 'type': 'NUMBER', 'description': 'ID'},
-                {'name': 'OCRM_ID', 'type': 'VARCHAR2', 'description': 'ID'},
-                {'name': 'LAST_NAME', 'type': 'VARCHAR2', 'description': 'NAME'},
-                {'name': 'FIRST_NAME', 'type': 'VARCHAR2', 'description': 'NAME'},
-                {'name': 'MIDDLE_NAME', 'type': 'VARCHAR2', 'description': 'NAME'},
-                {'name': 'LONG_NAME', 'type': 'VARCHAR2', 'description': 'NAME'},
-                {'name': 'SEX_CODE', 'type': 'VARCHAR2', 'description': 'Статус'},
-                {'name': 'MARITAL_STATUS', 'type': 'VARCHAR2', 'description': 'Статус'},
-                {'name': 'BIRTH_DATE', 'type': 'DATE', 'description': 'DATE'},
-                {'name': 'CITY_RESIDENCE', 'type': 'VARCHAR2', 'description': 'NAME'},
-                {'name': 'AGE', 'type': 'DATE', 'description': 'DATE'},
+                {'name': 'IIN', 'type': 'NUMBER', 'description': 'ID'},
+                {'name': 'FILIAL', 'type': 'VARCHAR2', 'description': 'Филиал'},
+                {'name': 'AGE', 'type': 'NUMBER', 'description': 'Age'},
+                {'name': 'CNT_ACT_BZK', 'type': 'NUMBER', 'description': 'BZK'},
+                {'name': 'REMAIN_SUM', 'type': 'NUMBER', 'description': 'REMAIN_SUM'},
+                {'name': 'ANNUITY_SUM', 'type': 'NUMBER', 'description': 'ANNUITY_SUM'},
+                {'name': 'SEX_CODE', 'type': 'VARCHAR2', 'description': 'Пол'},
+                {'name': 'MAX_DELAY_DAYS', 'type': 'NUMBER', 'description': 'MAX_DELAY_DAYS'},
+                {'name': 'CNT_DELAYS', 'type': 'NUMBER', 'description': 'CNT_DELAYS'},
+                {'name': 'IS_ZP', 'type': 'NUMBER', 'description': 'IS_ZP'},
+                {'name': 'CNT_APPS', 'type': 'NUMBER', 'description': 'CNT_APPS'},
+                {'name': 'UPLOAD_DATE', 'type': 'DATE', 'description': 'UPLOAD_DATE'},
             ]
     },
         'DSSB_APP.SoftCollection_theories': {
