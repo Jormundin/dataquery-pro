@@ -128,9 +128,12 @@ export const databaseAPI = {
   // Stratification and bulk theory creation
   stratifyAndCreateTheories: async (queryData, stratificationConfig) => {
     try {
+      // Use longer timeout for large dataset stratification (15 minutes)
       const response = await api.post('/theories/stratify-and-create', {
         queryData: queryData,
         stratificationConfig: stratificationConfig
+      }, {
+        timeout: 900000 // 15 minutes for large datasets
       });
 
       return response.data;
